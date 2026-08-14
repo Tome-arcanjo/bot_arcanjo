@@ -1,9 +1,9 @@
 import OpenAI from "openai";
 import "dotenv/config";
+import { getSettings } from "../services/settingsService.js";
 
 const DEFAULT_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 const MAX_TOKENS = parseInt(process.env.MAX_TOKENS) || 1024;
-const SYSTEM_PROMPT = process.env.SYSTEM_PROMPT || "Voce e um assistente inteligente.";
 
 let client;
 function getClient() {
@@ -21,7 +21,8 @@ function getClient() {
  */
 export async function sendToOpenAI(messages, systemPrompt) {
   const openai = getClient();
-  const systemMessage = { role: "system", content: systemPrompt || SYSTEM_PROMPT };
+  const settings = getSettings();
+  const systemMessage = { role: "system", content: systemPrompt || settings.systemPrompt };
   const allMessages = [systemMessage, ...messages.filter((m) => m.role !== "system")];
 
   const response = await openai.chat.completions.create({

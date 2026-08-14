@@ -1,9 +1,7 @@
 // ========== Estado da aplicação ==========
 let currentSessionId = null;
 let isLoading = false;
-
-const PERSONALITY_KEY = "arcanjo_personality";
-const DEFAULT_PERSONALITY = "Você é o Arcanjo, um assistente inteligente, prestativo e amigável. Responda sempre em português.";
+let globalPersonality = "";
 
 // ========== Elementos do DOM ==========
 const btnNewChat      = document.getElementById("btnNewChat");
@@ -22,27 +20,42 @@ const btnModalSave    = document.getElementById("btnModalSave");
 const personalityInput = document.getElementById("personalityInput");
 
 // ========== Personalidade ==========
-function getPersonality() {
-  return localStorage.getItem(PERSONALITY_KEY) || "";
+async function loadPersonalityFromServer() {
+  try {
+    const res = await fetch("/api/settings");
+    const data = await res.json();
+    globalPersonality = data.systemPrompt || "";
+    updatePersonalityBadge();
+  } catch (e) {
+    console.error("Erro ao carregar personalidade:", e);
+  }
 }
 
-function savePersonality(text) {
-  if (text.trim()) {
-    localStorage.setItem(PERSONALITY_KEY, text.trim());
-  } else {
-    localStorage.removeItem(PERSONALITY_KEY);
+async function savePersonality(text) {
+  try {
+    const res = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ systemPrompt: text })
+    });
+    const data = await res.json();
+    if (data.success) {
+      globalPersonality = text;
+      updatePersonalityBadge();
+    }
+  } catch (e) {
+    console.error("Erro ao salvar personalidade:", e);
+    showToast("Erro ao salvar personalidade");
   }
-  updatePersonalityBadge();
 }
 
 function updatePersonalityBadge() {
-  const custom = localStorage.getItem(PERSONALITY_KEY);
-  btnPersonality.classList.toggle("active", !!custom);
+  btnPersonality.classList.toggle("active", !!globalPersonality);
 }
 
 // ========== Modal ==========
 function openModal() {
-  personalityInput.value = getPersonality();
+  personalityInput.value = globalPersonality;
   modalOverlay.classList.add("open");
   personalityInput.focus();
 }
@@ -199,11 +212,9 @@ async function sendMessage() {
   scrollToBottom();
 
   try {
-    const personality = getPersonality();
     const { message } = await api("POST", `/sessions/${currentSessionId}/message`, {
       content,
-      provider: "openai",
-      systemPrompt: personality || undefined,
+      provider: "openai"
     });
     typingEl.remove();
     appendMessage("assistant", message.content);
@@ -290,5 +301,5 @@ btnStartChat.addEventListener("click", createNewSession);
 btnSend.addEventListener("click", sendMessage);
 
 // ========== Init ==========
-updatePersonalityBadge();
+loadPersonalityFromServer();
 loadSessions();

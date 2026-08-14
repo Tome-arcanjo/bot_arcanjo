@@ -5,7 +5,9 @@ import path from "path";
 import { fileURLToPath } from "url";
 import chatRoutes from "./routes/chat.js";
 import whatsappRoutes from "./routes/whatsapp.js";
+import settingsRoutes from "./routes/settingsRoutes.js";
 import { initDatabase } from "./database/db.js";
+import { loadSettingsFromDb } from "./services/settingsService.js";
 import { adminDashboard } from "./controllers/adminController.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -43,6 +45,7 @@ app.use((req, res, next) => {
 
 // ── Rotas da API ──
 app.use("/api/chat", chatRoutes);
+app.use("/api/settings", settingsRoutes);
 app.use("/webhook/whatsapp", whatsappRoutes);
 
 // ── Admin Dashboard ──
@@ -62,6 +65,7 @@ app.use((err, req, res, next) => {
 // ── Boot ──
 async function start() {
   await initDatabase();
+  await loadSettingsFromDb();
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log("=".repeat(50));
