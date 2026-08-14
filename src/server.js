@@ -17,7 +17,15 @@ const NODE_ENV = process.env.NODE_ENV || "development";
 
 // ── Middlewares ──
 app.use(cors());
-app.use(express.json());
+// Guarda o corpo bruto da requisição (necessário para validar a assinatura
+// X-Hub-Signature-256 enviada pela Meta no webhook do WhatsApp).
+app.use(
+  express.json({
+    verify: (req, res, buf) => {
+      req.rawBody = buf;
+    },
+  })
+);
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, "../public")));
 
@@ -52,14 +60,19 @@ app.use((err, req, res, next) => {
 });
 
 // ── Boot ──
-initDatabase();
-app.listen(PORT, "0.0.0.0", () => {
-  console.log("=".repeat(50));
-  console.log(`  ⚡ Bot Arcanjo`);
-  console.log(`  Ambiente : ${NODE_ENV}`);
-  console.log(`  Porta    : ${PORT}`);
-  console.log(`  Web      : http://localhost:${PORT}`);
-  console.log(`  Admin    : http://localhost:${PORT}/admin`);
-  console.log(`  Webhook  : http://localhost:${PORT}/webhook/whatsapp`);
-  console.log("=".repeat(50));
-});
+async function start() {
+  await initDatabase();
+
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log("=".repeat(50));
+    console.log(`  ⚡ Bot Arcanjo`);
+    console.log(`  Ambiente : ${NODE_ENV}`);
+    console.log(`  Porta    : ${PORT}`);
+    console.log(`  Web      : http://localhost:${PORT}`);
+    console.log(`  Admin    : http://localhost:${PORT}/admin`);
+    console.log(`  Webhook  : http://localhost:${PORT}/webhook/whatsapp`);
+    console.log("=".repeat(50));
+  });
+}
+
+start();
