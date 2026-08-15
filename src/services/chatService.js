@@ -3,6 +3,7 @@ import { sendToOpenAI } from "../providers/openai.js";
 import { getDb } from "../database/db.js";
 import { v4 as uuidv4 } from "uuid";
 import { getCaseByPhone } from "./crmService.js";
+import { classifyAndUpdateCrmCase } from "./crmClassifierService.js";
 import "dotenv/config";
 
 const DEFAULT_PROVIDER = process.env.AI_PROVIDER || "openai";
@@ -148,6 +149,20 @@ export async function processMessage(sessionId, userContent, provider, systemPro
     content: userContent,
   });
   if (insertUserError) throw new Error(insertUserError.message);
+
+  // --- CLASSIFICAÇÃO AUTOMÁTICA DO CRM ---
+  // Roda em segundo plano (sem "await") para não atrasar a resposta ao
+  // cliente. A IA aqui só classifica (resumo/urgência/área) — nunca move
+  // o caso no Kanban nem toma decisões; isso continua manual. Só se aplica
+  // a conversas de WhatsApp (sessões com telefone associado).
+  if (session.phone) {
+    classifyAndUpdateCrmCase({
+      phone: session.phone,
+      userContent,
+      provider: usedProvider,
+    }).catch((e) => console.error("[CRM Classifier]", e.message));
+  }
+  // ----------------------------------------
 
   // Busca historico de mensagens para contexto (max 10)
   const { data: history, error: historyError } = await db
