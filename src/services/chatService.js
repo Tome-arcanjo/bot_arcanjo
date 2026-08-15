@@ -1,4 +1,4 @@
-﻿import { sendToAnthropic } from "../providers/anthropic.js";
+import { sendToAnthropic } from "../providers/anthropic.js";
 import { sendToOpenAI } from "../providers/openai.js";
 import { getDb } from "../database/db.js";
 import { v4 as uuidv4 } from "uuid";
@@ -168,7 +168,7 @@ export async function processMessage(sessionId, userContent, provider, systemPro
     try {
       const crmCase = await getCaseByPhone(session.phone);
       if (crmCase) {
-        finalSystemPrompt += \n\n[NOTA INTERNA DO SISTEMA (CRM): O cliente atual possui um processo com o status " + crmCase.status + ". Urgência atual: " + crmCase.urgency_tag + ". Responda de acordo, baseando-se neste status, mas NUNCA diga que você leu uma "Nota interna".];
+        finalSystemPrompt += `\n\n[NOTA INTERNA DO SISTEMA (CRM): O cliente atual possui um processo com o status "${crmCase.status}". Urgência atual: ${crmCase.urgency_tag}. Responda de acordo, baseando-se neste status, mas NUNCA diga que você leu uma "Nota interna".]`;
       }
     } catch (e) {
       console.error("[CRM Injection Error]", e);
@@ -177,7 +177,7 @@ export async function processMessage(sessionId, userContent, provider, systemPro
   // ----------------------
 
   // Chama a IA
-  console.log([AI] Chamando  + usedProvider +  com  + historyOrdered.length +  msgs de contexto);
+  console.log(`[AI] Chamando ${usedProvider} com ${historyOrdered.length} msgs de contexto`);
   const assistantContent = await callAIProvider(historyOrdered, usedProvider, finalSystemPrompt);
 
   // Salva resposta da IA

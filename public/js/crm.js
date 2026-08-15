@@ -1,4 +1,4 @@
-﻿const COLUMNS = [
+const COLUMNS = [
   'Novo caso', 'Em análise', 'Documentos pendentes', 'Processo iniciado',
   'Petição em elaboração', 'Petição protocolada', 'Aguardando manifestação',
   'Aguardando audiência', 'Aguardando decisão', 'Recurso', 'Finalizado', 'Arquivado'
@@ -25,7 +25,7 @@ function renderBoard(cases) {
   COLUMNS.forEach(status => {
     const col = document.createElement('div');
     col.className = 'kanban-column';
-    col.innerHTML = <h3> + status + </h3>;
+    col.innerHTML = `<h3>${status}</h3>`;
     
     const colCases = cases.filter(c => c.status === status);
     
@@ -36,17 +36,17 @@ function renderBoard(cases) {
       let options = '';
       COLUMNS.forEach(opt => {
         const selected = opt === status ? 'selected' : '';
-        options += <option value=" + opt + "  + selected + > + opt + </option>;
+        options += `<option value="${opt}" ${selected}>${opt}</option>`;
       });
 
-      card.innerHTML = 
-        <div class="card-title"> + (c.client_name || 'Sem nome') + </div>
-        <div class="card-phone"> + c.phone + </div>
-        <span class="tag  + getTagClass(c.urgency_tag) + "> + (c.urgency_tag || 'Normal') + </span>
-        <select class="select-status" onchange="updateStatus(' + c.id + ', this.value)">
-           + options + 
+      card.innerHTML = `
+        <div class="card-title">${c.client_name || 'Sem nome'}</div>
+        <div class="card-phone">${c.phone}</div>
+        <span class="tag ${getTagClass(c.urgency_tag)}">${c.urgency_tag || 'Normal'}</span>
+        <select class="select-status" onchange="updateStatus('${c.id}', this.value)">
+           ${options}
         </select>
-      ;
+      `;
       col.appendChild(card);
     });
     
