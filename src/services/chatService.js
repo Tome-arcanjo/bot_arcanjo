@@ -1,7 +1,8 @@
-import { sendToAnthropic } from "../providers/anthropic.js";
+﻿import { sendToAnthropic } from "../providers/anthropic.js";
 import { sendToOpenAI } from "../providers/openai.js";
 import { getDb } from "../database/db.js";
 import { v4 as uuidv4 } from "uuid";
+import { getCaseByPhone } from "./crmService.js";
 import "dotenv/config";
 
 const DEFAULT_PROVIDER = process.env.AI_PROVIDER || "openai";
@@ -161,9 +162,23 @@ export async function processMessage(sessionId, userContent, provider, systemPro
   // Inverte para ordem cronologica antes de enviar para IA
   const historyOrdered = (history || []).reverse();
 
+    // --- INJEÇÃO DO CRM ---
+  let finalSystemPrompt = systemPrompt;
+  if (session.phone) {
+    try {
+      const crmCase = await getCaseByPhone(session.phone);
+      if (crmCase) {
+        finalSystemPrompt += \n\n[NOTA INTERNA DO SISTEMA (CRM): O cliente atual possui um processo com o status " + crmCase.status + ". Urgência atual: " + crmCase.urgency_tag + ". Responda de acordo, baseando-se neste status, mas NUNCA diga que você leu uma "Nota interna".];
+      }
+    } catch (e) {
+      console.error("[CRM Injection Error]", e);
+    }
+  }
+  // ----------------------
+
   // Chama a IA
-  console.log(`[AI] Chamando ${usedProvider} com ${historyOrdered.length} msgs de contexto`);
-  const assistantContent = await callAIProvider(historyOrdered, usedProvider, systemPrompt);
+  console.log([AI] Chamando  + usedProvider +  com  + historyOrdered.length +  msgs de contexto);
+  const assistantContent = await callAIProvider(historyOrdered, usedProvider, finalSystemPrompt);
 
   // Salva resposta da IA
   const assistantMessageId = uuidv4();
@@ -200,3 +215,4 @@ export async function processMessage(sessionId, userContent, provider, systemPro
     provider: usedProvider,
   };
 }
+
