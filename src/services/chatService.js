@@ -4,6 +4,7 @@ import { getDb } from "../database/db.js";
 import { v4 as uuidv4 } from "uuid";
 import { getCaseByPhone } from "./crmService.js";
 import { classifyAndUpdateCrmCase } from "./crmClassifierService.js";
+import { getSettings } from "./settingsService.js";
 import "dotenv/config";
 
 const DEFAULT_PROVIDER = process.env.AI_PROVIDER || "openai";
@@ -178,7 +179,14 @@ export async function processMessage(sessionId, userContent, provider, systemPro
   const historyOrdered = (history || []).reverse();
 
     // --- INJEÇÃO DO CRM ---
-  let finalSystemPrompt = systemPrompt;
+  // Importante: se nenhum systemPrompt explícito foi passado (é o caso do
+  // WhatsApp, que sempre usa a personalidade configurada no admin), cai
+  // aqui para a personalidade compartilhada ANTES de qualquer concatenação
+  // abaixo. Sem isso, "undefined" + a nota do CRM virava uma string
+  // literal "undefinedNota..." que era usada no lugar da personalidade
+  // configurada — por isso ela parecia "travada" sempre que o cliente já
+  // tinha um caso aberto no CRM.
+  let finalSystemPrompt = systemPrompt || getSettings().systemPrompt;
   if (session.phone) {
     try {
       const crmCase = await getCaseByPhone(session.phone);
