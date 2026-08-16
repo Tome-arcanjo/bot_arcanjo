@@ -20,12 +20,16 @@
     .tag-normal { background: #eab308; }
     .tag-baixa { background: #22c55e; }
     .select-status { width: 100%; padding: 5px; margin-top: 10px; border: 1px solid #ddd; border-radius: 4px; }
-    nav { margin-bottom: 20px; }
+    nav { margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between; }
     nav a { text-decoration: none; color: #2563eb; font-weight: 500; }
+    nav a.logout-link { color: #64748b; }
   </style>
 </head>
 <body>
-  <nav><a href="/">&larr; Voltar para o Chat</a></nav>
+  <nav>
+    <a href="/">&larr; Voltar para o Chat</a>
+    <a href="/logout" class="logout-link">Sair</a>
+  </nav>
   <h1>CRM - Gestão de Processos</h1>
   
   <div class="kanban-board" id="kanbanBoard">

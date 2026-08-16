@@ -1,12 +1,15 @@
-﻿import "dotenv/config";
+import "dotenv/config";
 import express from "express";
 import cors from "cors";
+import session from "express-session";
 import path from "path";
 import { fileURLToPath } from "url";
 import chatRoutes from "./routes/chat.js";
 import whatsappRoutes from "./routes/whatsapp.js";
 import settingsRoutes from "./routes/settingsRoutes.js";
 import crmRoutes from "./routes/crmRoutes.js";
+import authRoutes from "./routes/auth.js";
+import { requireAuth } from "./middleware/auth.js";
 import { initDatabase } from "./database/db.js";
 import { loadSettingsFromDb } from "./services/settingsService.js";
 import { adminDashboard } from "./controllers/adminController.js";
@@ -18,9 +21,13 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const NODE_ENV = process.env.NODE_ENV || "development";
 
-// â”€â”€ Middlewares â”€â”€
+// Necessário atrás do proxy reverso do Nginx: sem isso, o Express não sabe
+// que a conexão original era HTTPS, e os cookies "secure" nunca são aceitos.
+app.set("trust proxy", 1);
+
+// ── Middlewares ──
 app.use(cors());
-// Guarda o corpo bruto da requisiÃ§Ã£o (necessÃ¡rio para validar a assinatura
+// Guarda o corpo bruto da requisição (necessário para validar a assinatura
 // X-Hub-Signature-256 enviada pela Meta no webhook do WhatsApp).
 app.use(
   express.json({
@@ -30,48 +37,72 @@ app.use(
   })
 );
 app.use(express.urlencoded({ extended: true }));
+
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET || "troque-este-segredo-no-env",
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      secure: NODE_ENV === "production",
+      httpOnly: true,
+      sameSite: "lax",
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 dias
+    },
+  })
+);
+
+// Rotas de login/logout — precisam ficar acessíveis ANTES do bloqueio de
+// autenticação abaixo, senão ninguém conseguiria nem chegar à tela de login.
+app.use(authRoutes);
+
+// A partir daqui, tudo exige login — exceto o webhook do WhatsApp (ver
+// src/middleware/auth.js), que é protegido separadamente pela validação de
+// assinatura da Meta.
+app.use(requireAuth);
+
 app.use(express.static(path.join(__dirname, "../public")));
 
-// Log de requisiÃ§Ãµes (simplificado para produÃ§Ã£o)
+// Log de requisições (simplificado para produção)
 app.use((req, res, next) => {
   const start = Date.now();
   res.on("finish", () => {
     const ms = Date.now() - start;
     if (req.path !== "/favicon.ico") {
-      console.log(`[${NODE_ENV}] ${req.method} ${req.path} â†’ ${res.statusCode} (${ms}ms)`);
+      console.log(`[${NODE_ENV}] ${req.method} ${req.path} → ${res.statusCode} (${ms}ms)`);
     }
   });
   next();
 });
 
-// â”€â”€ Rotas da API â”€â”€
+// ── Rotas da API ──
 app.use("/api/chat", chatRoutes);
 app.use("/api/settings", settingsRoutes);
 app.use("/api/crm", crmRoutes);
 app.use("/webhook/whatsapp", whatsappRoutes);
 
-// â”€â”€ Admin Dashboard â”€â”€
+// ── Admin Dashboard ──
 app.get("/admin", adminDashboard);
 
-// â”€â”€ Interface Web â”€â”€
+// ── Interface Web ──
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "../public/index.html"));
 });
 
-// â”€â”€ Handler de erros nÃ£o tratados â”€â”€
+// ── Handler de erros não tratados ──
 app.use((err, req, res, next) => {
   console.error("[Server Error]", err.message);
   res.status(500).json({ success: false, error: "Erro interno do servidor." });
 });
 
-// â”€â”€ Boot â”€â”€
+// ── Boot ──
 async function start() {
   await initDatabase();
   await loadSettingsFromDb();
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log("=".repeat(50));
-    console.log(`  âš¡ Bot Arcanjo`);
+    console.log(`  ⚡ Bot Arcanjo`);
     console.log(`  Ambiente : ${NODE_ENV}`);
     console.log(`  Porta    : ${PORT}`);
     console.log(`  Web      : http://localhost:${PORT}`);
@@ -82,4 +113,3 @@ async function start() {
 }
 
 start();
-

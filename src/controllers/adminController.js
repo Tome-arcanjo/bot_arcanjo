@@ -99,6 +99,12 @@ function buildAdminHTML(messages, stats) {
       background: var(--accent); color: white; border: none; padding: 8px 18px;
       border-radius: 8px; cursor: pointer; font-size: 0.85rem; text-decoration: none;
     }
+    .header-actions { display: flex; align-items: center; gap: 10px; }
+    .crm-link, .logout-link {
+      color: var(--muted); text-decoration: none; font-size: 0.85rem;
+      padding: 8px 14px; border-radius: 8px; border: 1px solid var(--border);
+    }
+    .crm-link:hover, .logout-link:hover { color: var(--text); border-color: var(--accent); }
     .stats { display: flex; gap: 16px; padding: 24px 32px; flex-wrap: wrap; }
     .stat-card {
       background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
@@ -130,7 +136,11 @@ function buildAdminHTML(messages, stats) {
 <body>
   <header>
     <h1>⚡ Bot <span>Arcanjo</span> — Admin</h1>
-    <a href="/admin" class="refresh-btn">↺ Atualizar</a>
+    <div class="header-actions">
+      <a href="/crm.html" class="crm-link">CRM</a>
+      <a href="/admin" class="refresh-btn">↺ Atualizar</a>
+      <a href="/logout" class="logout-link">Sair</a>
+    </div>
   </header>
 
   <div class="stats">
