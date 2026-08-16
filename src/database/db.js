@@ -16,8 +16,18 @@ export function getDb() {
   return supabase;
 }
 
-// As tabelas já devem existir no Supabase (criadas via SQL Editor).
-// Esta função existe apenas para manter compatibilidade com server.js.
-export function initDatabase() {
+// As tabelas já devem existir no Supabase (criadas via SQL Editor ou
+// "npm run db:migrate"). Aqui fazemos uma checagem leve de conectividade no
+// boot para falhar cedo e com uma mensagem clara, em vez de só descobrir
+// que as credenciais estão erradas na primeira requisição de um usuário.
+export async function initDatabase() {
+  const { error } = await supabase.from("sessions").select("id", { count: "exact", head: true });
+
+  if (error) {
+    console.error("[DB] Não foi possível conectar ao Supabase:", error.message);
+    console.error("[DB] Verifique SUPABASE_URL/SUPABASE_KEY e se as tabelas foram criadas (init.sql).");
+    return;
+  }
+
   console.log("[DB] Conectado ao Supabase com sucesso.");
 }

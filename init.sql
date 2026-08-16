@@ -1,3 +1,4 @@
+
 -- ============================================================
 -- Bot Arcanjo — Script de inicialização do banco (Supabase)
 -- Execute no SQL Editor do Supabase Dashboard
@@ -40,3 +41,32 @@ ALTER TABLE sessions ADD COLUMN IF NOT EXISTS phone TEXT;
 CREATE INDEX IF NOT EXISTS idx_sessions_phone
   ON sessions(phone)
   WHERE phone IS NOT NULL;
+
+-- ============================================================
+-- Configurações globais do bot
+-- ============================================================
+CREATE TABLE IF NOT EXISTS bot_settings (
+  id TEXT PRIMARY KEY DEFAULT 'global',
+  system_prompt TEXT NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Inserir configuração padrão (se não existir)
+INSERT INTO bot_settings (id, system_prompt)
+VALUES ('global', 'Você é o Arcanjo, um assistente inteligente, prestativo e amigável. Responda sempre em português.')
+ON CONFLICT (id) DO NOTHING;
+
+-- ============================================================
+-- CRM Cases
+-- ============================================================
+CREATE TABLE IF NOT EXISTS crm_cases (
+  id          TEXT        PRIMARY KEY,
+  phone       TEXT        NOT NULL,
+  client_name TEXT,
+  status      TEXT        NOT NULL DEFAULT 'Novo caso',
+  urgency_tag TEXT        DEFAULT 'Normal',
+  area_tag    TEXT,
+  summary     TEXT,
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ DEFAULT NOW()
+);

@@ -2,6 +2,9 @@ import { sendToAnthropic } from "../providers/anthropic.js";
 import { sendToOpenAI } from "../providers/openai.js";
 import { getDb } from "../database/db.js";
 import { v4 as uuidv4 } from "uuid";
+import { getCaseByPhone } from "./crmService.js";
+import { classifyAndUpdateCrmCase } from "./crmClassifierService.js";
+import { getSettings } from "./settingsService.js";
 import "dotenv/config";
 
 const DEFAULT_PROVIDER = process.env.AI_PROVIDER || "openai";
@@ -148,6 +151,20 @@ export async function processMessage(sessionId, userContent, provider, systemPro
   });
   if (insertUserError) throw new Error(insertUserError.message);
 
+  // --- CLASSIFICAÇÃO AUTOMÁTICA DO CRM ---
+  // Roda em segundo plano (sem "await") para não atrasar a resposta ao
+  // cliente. A IA aqui só classifica (resumo/urgência/área) — nunca move
+  // o caso no Kanban nem toma decisões; isso continua manual. Só se aplica
+  // a conversas de WhatsApp (sessões com telefone associado).
+  if (session.phone) {
+    classifyAndUpdateCrmCase({
+      phone: session.phone,
+      userContent,
+      provider: usedProvider,
+    }).catch((e) => console.error("[CRM Classifier]", e.message));
+  }
+  // ----------------------------------------
+
   // Busca historico de mensagens para contexto (max 10)
   const { data: history, error: historyError } = await db
     .from("messages")
@@ -161,9 +178,30 @@ export async function processMessage(sessionId, userContent, provider, systemPro
   // Inverte para ordem cronologica antes de enviar para IA
   const historyOrdered = (history || []).reverse();
 
+    // --- INJEÇÃO DO CRM ---
+  // Importante: se nenhum systemPrompt explícito foi passado (é o caso do
+  // WhatsApp, que sempre usa a personalidade configurada no admin), cai
+  // aqui para a personalidade compartilhada ANTES de qualquer concatenação
+  // abaixo. Sem isso, "undefined" + a nota do CRM virava uma string
+  // literal "undefinedNota..." que era usada no lugar da personalidade
+  // configurada — por isso ela parecia "travada" sempre que o cliente já
+  // tinha um caso aberto no CRM.
+  let finalSystemPrompt = systemPrompt || getSettings().systemPrompt;
+  if (session.phone) {
+    try {
+      const crmCase = await getCaseByPhone(session.phone);
+      if (crmCase) {
+        finalSystemPrompt += `\n\n[NOTA INTERNA DO SISTEMA (CRM): O cliente atual possui um processo com o status "${crmCase.status}". Urgência atual: ${crmCase.urgency_tag}. Responda de acordo, baseando-se neste status, mas NUNCA diga que você leu uma "Nota interna".]`;
+      }
+    } catch (e) {
+      console.error("[CRM Injection Error]", e);
+    }
+  }
+  // ----------------------
+
   // Chama a IA
   console.log(`[AI] Chamando ${usedProvider} com ${historyOrdered.length} msgs de contexto`);
-  const assistantContent = await callAIProvider(historyOrdered, usedProvider, systemPrompt);
+  const assistantContent = await callAIProvider(historyOrdered, usedProvider, finalSystemPrompt);
 
   // Salva resposta da IA
   const assistantMessageId = uuidv4();
@@ -200,3 +238,4 @@ export async function processMessage(sessionId, userContent, provider, systemPro
     provider: usedProvider,
   };
 }
+

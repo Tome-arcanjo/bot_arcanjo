@@ -1,0 +1,41 @@
+﻿<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bot Arcanjo - CRM</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    body { font-family: 'Inter', sans-serif; background-color: #f4f7f6; margin: 0; padding: 20px; }
+    h1 { color: #333; }
+    .kanban-board { display: flex; gap: 20px; overflow-x: auto; padding-bottom: 20px; align-items: flex-start; }
+    .kanban-column { background: #e3e8ee; min-width: 300px; border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 10px; }
+    .kanban-column h3 { margin: 0 0 10px 0; font-size: 16px; color: #444; }
+    .kanban-card { background: white; padding: 15px; border-radius: 6px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    .card-title { font-weight: 600; margin-bottom: 5px; }
+    .card-phone { font-size: 12px; color: #666; margin-bottom: 10px; }
+    .tag { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 12px; font-weight: 600; color: white; }
+    .tag-critico { background: #ef4444; }
+    .tag-alta { background: #f97316; }
+    .tag-normal { background: #eab308; }
+    .tag-baixa { background: #22c55e; }
+    .select-status { width: 100%; padding: 5px; margin-top: 10px; border: 1px solid #ddd; border-radius: 4px; }
+    nav { margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between; }
+    nav a { text-decoration: none; color: #2563eb; font-weight: 500; }
+    nav a.logout-link { color: #64748b; }
+  </style>
+</head>
+<body>
+  <nav>
+    <a href="/">&larr; Voltar para o Chat</a>
+    <a href="/logout" class="logout-link">Sair</a>
+  </nav>
+  <h1>CRM - Gestão de Processos</h1>
+  
+  <div class="kanban-board" id="kanbanBoard">
+    <!-- As colunas serão renderizadas aqui pelo JS -->
+  </div>
+
+  <script src="/js/crm.js"></script>
+</body>
+</html>
