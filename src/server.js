@@ -8,11 +8,20 @@ import chatRoutes from "./routes/chat.js";
 import whatsappRoutes from "./routes/whatsapp.js";
 import settingsRoutes from "./routes/settingsRoutes.js";
 import crmRoutes from "./routes/crmRoutes.js";
+import contatosRoutes from "./routes/contatosRoutes.js";
+import conversasRoutes from "./routes/conversasRoutes.js";
 import authRoutes from "./routes/auth.js";
 import { requireAuth } from "./middleware/auth.js";
 import { initDatabase } from "./database/db.js";
 import { loadSettingsFromDb } from "./services/settingsService.js";
-import { adminDashboard } from "./controllers/adminController.js";
+import {
+  dashboardRoot,
+  configuracoesView,
+  canaisView,
+  crmView,
+  conversasView,
+  contatosView,
+} from "./controllers/dashboardController.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -79,12 +88,22 @@ app.use((req, res, next) => {
 app.use("/api/chat", chatRoutes);
 app.use("/api/settings", settingsRoutes);
 app.use("/api/crm", crmRoutes);
+app.use("/api/contatos", contatosRoutes);
+app.use("/api/conversas", conversasRoutes);
 app.use("/webhook/whatsapp", whatsappRoutes);
 
-// ── Admin Dashboard ──
-app.get("/admin", adminDashboard);
+// ── Painel (dashboard pós-login) ──
+// /admin é mantido como redirecionamento (compatibilidade com links antigos)
+// — a versão atual dessa tela agora vive em /dashboard/canais.
+app.get("/admin", (req, res) => res.redirect("/dashboard/canais"));
+app.get("/dashboard", dashboardRoot);
+app.get("/dashboard/configuracoes", configuracoesView);
+app.get("/dashboard/crm", crmView);
+app.get("/dashboard/conversas", conversasView);
+app.get("/dashboard/contatos", contatosView);
+app.get("/dashboard/canais", canaisView);
 
-// ── Interface Web ──
+// ── Interface Web (chat de teste) ──
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "../public/index.html"));
 });

@@ -1,0 +1,382 @@
+/* ============================================================
+   Miguel Arcanjo Advocacia — Design tokens e componentes
+   compartilhados do painel (dashboard, CRM, conversas, contatos,
+   canais, login).
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap');
+
+:root {
+  /* Marca */
+  --brand-gold: #d3a14a;
+  --brand-gold-dark: #b8873a;
+  --brand-gold-soft: rgba(211, 161, 74, 0.13);
+  --brand-gold-soft-strong: rgba(211, 161, 74, 0.22);
+  --brand-black: #000000;
+  --brand-dark: #1c1c1c;
+  --brand-dark-soft: #2b2b2b;
+
+  /* Superfícies */
+  --bg-app: #f4f4f4;
+  --bg-card: #ffffff;
+  --bg-sidebar: var(--brand-black);
+  --bg-sidebar-hover: rgba(255, 255, 255, 0.06);
+  --border: #e4e2dd;
+  --border-soft: #ececec;
+
+  /* Texto */
+  --text-primary: #1a1a1a;
+  --text-secondary: #6f6f6f;
+  --text-muted: #9a9a9a;
+  --text-on-dark: #f4f4f4;
+  --text-on-dark-muted: #9c9c9c;
+
+  /* Estado */
+  --success: #22c55e;
+  --danger: #ef4444;
+  --warning: #f97316;
+  --info: #3b82f6;
+
+  /* Layout */
+  --sidebar-width: 248px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.08);
+}
+
+* , *::before, *::after { box-sizing: border-box; }
+
+body.dashboard-body {
+  margin: 0;
+  font-family: 'Montserrat', system-ui, sans-serif;
+  background: var(--bg-app);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: inherit; }
+
+/* ── Layout geral ── */
+.dash-shell {
+  display: flex;
+  min-height: 100vh;
+}
+
+/* ── Sidebar ── */
+.dash-sidebar {
+  width: var(--sidebar-width);
+  flex-shrink: 0;
+  background: var(--bg-sidebar);
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  z-index: 20;
+}
+
+.dash-sidebar-logo {
+  padding: 26px 24px 20px;
+  display: flex;
+  align-items: center;
+}
+
+.dash-sidebar-logo img {
+  height: 26px;
+  width: auto;
+}
+
+.dash-nav {
+  flex: 1;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dash-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 14px;
+  border-radius: var(--radius-sm);
+  color: var(--text-on-dark-muted);
+  text-decoration: none;
+  font-size: 0.88rem;
+  font-weight: 500;
+  border-left: 3px solid transparent;
+  transition: background 0.15s, color 0.15s;
+}
+
+.dash-nav-item svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.dash-nav-item:hover {
+  background: var(--bg-sidebar-hover);
+  color: var(--text-on-dark);
+}
+
+.dash-nav-item.active {
+  background: var(--brand-gold-soft);
+  color: var(--brand-gold);
+  border-left-color: var(--brand-gold);
+  font-weight: 600;
+}
+
+.dash-sidebar-footer {
+  padding: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.dash-nav-item.logout {
+  color: var(--text-on-dark-muted);
+}
+
+.dash-nav-item.logout:hover {
+  color: #f88;
+  background: rgba(239, 68, 68, 0.1);
+}
+
+/* ── Conteúdo principal ── */
+.dash-main {
+  margin-left: var(--sidebar-width);
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.dash-topbar {
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  padding: 16px 32px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.dash-back-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  cursor: pointer;
+  text-decoration: none;
+  flex-shrink: 0;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.dash-back-btn:hover {
+  border-color: var(--brand-gold);
+  color: var(--brand-gold-dark);
+}
+
+.dash-back-btn svg { width: 18px; height: 18px; }
+
+.dash-topbar h1 {
+  font-size: 1.05rem;
+  font-weight: 700;
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+}
+
+.dash-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.dash-content {
+  padding: 28px 32px 48px;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Usado por telas que precisam controlar o próprio scroll interno (ex:
+   Conversas, com lista + thread lado a lado) em vez do scroll padrão da
+   página. */
+body.no-content-scroll .dash-content {
+  padding: 0;
+  overflow: hidden;
+  height: calc(100vh - 67px);
+}
+
+/* ── Botões ── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 18px;
+  border-radius: var(--radius-sm);
+  font-size: 0.86rem;
+  font-weight: 600;
+  font-family: inherit;
+  border: 1px solid transparent;
+  cursor: pointer;
+  text-decoration: none;
+  transition: filter 0.15s, background 0.15s, border-color 0.15s;
+}
+
+.btn-primary {
+  background: var(--brand-gold);
+  color: #1a1206;
+}
+.btn-primary:hover { filter: brightness(0.94); }
+
+.btn-secondary {
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border-color: var(--border);
+}
+.btn-secondary:hover { border-color: var(--brand-gold); }
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+  border-color: transparent;
+}
+.btn-ghost:hover { color: var(--text-primary); }
+
+/* ── Cards / stats ── */
+.dash-stats {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+}
+
+.dash-stat-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 18px 24px;
+  flex: 1;
+  min-width: 160px;
+  box-shadow: var(--shadow-sm);
+}
+
+.dash-stat-card .number {
+  font-size: 1.9rem;
+  font-weight: 800;
+  color: var(--brand-gold-dark);
+  line-height: 1.1;
+}
+
+.dash-stat-card .label {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+.dash-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+}
+
+/* ── Tabela ── */
+.dash-table-wrapper { overflow-x: auto; }
+
+.dash-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.dash-table th {
+  text-align: left;
+  padding: 12px 16px;
+  background: #fafaf8;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+}
+
+.dash-table td {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-soft);
+  vertical-align: top;
+}
+
+.dash-table tr:hover td { background: var(--brand-gold-soft); }
+
+/* ── Badges ── */
+.badge {
+  display: inline-block;
+  padding: 3px 11px;
+  border-radius: 100px;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.badge-gold { background: var(--brand-gold-soft-strong); color: var(--brand-gold-dark); }
+.badge-blue { background: rgba(59, 130, 246, 0.13); color: #2563eb; }
+.badge-green { background: rgba(34, 197, 94, 0.13); color: #16a34a; }
+.badge-red { background: rgba(239, 68, 68, 0.13); color: #dc2626; }
+.badge-orange { background: rgba(249, 115, 22, 0.13); color: #ea580c; }
+.badge-gray { background: #ececec; color: var(--text-secondary); }
+
+.dash-empty {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+/* ── Formulários ── */
+.field-label {
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 7px;
+}
+
+.field-input,
+.field-textarea {
+  width: 100%;
+  padding: 11px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: 0.9rem;
+  color: var(--text-primary);
+  background: var(--bg-card);
+}
+
+.field-input:focus,
+.field-textarea:focus {
+  outline: none;
+  border-color: var(--brand-gold);
+  box-shadow: 0 0 0 3px var(--brand-gold-soft);
+}
+
+.field-textarea { resize: vertical; line-height: 1.55; }
+
+/* ── Responsivo básico ── */
+@media (max-width: 860px) {
+  .dash-sidebar { width: 72px; }
+  .dash-sidebar-logo img { display: none; }
+  .dash-nav-item span.label { display: none; }
+  .dash-main { margin-left: 72px; }
+  .dash-content { padding: 20px; }
+}

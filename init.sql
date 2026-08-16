@@ -70,3 +70,20 @@ CREATE TABLE IF NOT EXISTS crm_cases (
   created_at  TIMESTAMPTZ DEFAULT NOW(),
   updated_at  TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- ============================================================
+-- Contatos (cadastro de clientes capturado automaticamente pela IA
+-- a partir das conversas de WhatsApp — ver clientsService.js)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS clients (
+  phone       TEXT        PRIMARY KEY,
+  name        TEXT,
+  email       TEXT,
+  address     TEXT,
+  birth_date  DATE,
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_clients_name ON clients(name);
+CREATE INDEX IF NOT EXISTS idx_clients_email ON clients(email);

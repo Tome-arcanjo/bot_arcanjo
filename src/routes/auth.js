@@ -7,7 +7,7 @@ const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "admin";
 const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH;
 
 router.get("/login", (req, res) => {
-  if (req.session && req.session.authenticated) return res.redirect("/");
+  if (req.session && req.session.authenticated) return res.redirect("/dashboard");
   res.send(buildLoginHTML());
 });
 
@@ -31,7 +31,7 @@ router.post("/login", async (req, res) => {
 
   if (validUsername && validPassword) {
     req.session.authenticated = true;
-    return res.redirect("/");
+    return res.redirect("/dashboard");
   }
 
   console.warn(`[Auth] Tentativa de login falhou para usuário "${username}"`);
@@ -61,48 +61,43 @@ function buildLoginHTML(error) {
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Bot Arcanjo — Login</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <title>Miguel Arcanjo Advocacia — Login</title>
+  <link rel="icon" href="/img/symbol-gold.png" />
+  <link rel="stylesheet" href="/css/brand.css" />
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    :root {
-      --bg: #0f0f13; --surface: #16161e; --border: #2a2a3a;
-      --accent: #7c6fe0; --accent-hover: #9585f5; --text: #e8e8f0; --muted: #8888aa;
-      --error: #ef4444;
-    }
     body {
-      font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text);
       min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px;
+      background: var(--brand-black);
+      background-image: radial-gradient(circle at 15% 15%, rgba(211,161,74,0.08), transparent 45%);
     }
     .login-card {
-      background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
-      padding: 40px 36px; width: 100%; max-width: 380px;
+      background: var(--brand-dark); border: 1px solid rgba(255,255,255,0.08); border-radius: var(--radius-lg);
+      padding: 44px 40px; width: 100%; max-width: 400px; box-shadow: var(--shadow-md);
     }
-    .logo { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 1.3rem; font-weight: 700; }
-    .logo span { color: var(--accent); }
-    .subtitle { color: var(--muted); font-size: 0.88rem; margin-bottom: 28px; }
-    label { display: block; font-size: 0.82rem; color: var(--muted); margin-bottom: 6px; font-weight: 500; }
+    .login-logo { display: block; height: 30px; width: auto; margin-bottom: 30px; }
+    .subtitle { color: var(--text-on-dark-muted); font-size: 0.88rem; margin-bottom: 30px; }
+    label { display: block; font-size: 0.82rem; color: var(--text-on-dark-muted); margin-bottom: 6px; font-weight: 500; }
     input {
-      width: 100%; padding: 11px 14px; margin-bottom: 18px; background: var(--bg);
-      border: 1px solid var(--border); border-radius: 8px; color: var(--text);
+      width: 100%; padding: 12px 14px; margin-bottom: 20px; background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.12); border-radius: var(--radius-sm); color: var(--text-on-dark);
       font-size: 0.92rem; font-family: inherit;
     }
-    input:focus { outline: none; border-color: var(--accent); }
+    input:focus { outline: none; border-color: var(--brand-gold); }
     button {
-      width: 100%; padding: 12px; background: var(--accent); color: white; border: none;
-      border-radius: 8px; font-size: 0.92rem; font-weight: 600; cursor: pointer;
-      font-family: inherit; transition: background 0.15s;
+      width: 100%; padding: 13px; background: var(--brand-gold); color: #1a1206; border: none;
+      border-radius: var(--radius-sm); font-size: 0.92rem; font-weight: 700; cursor: pointer;
+      font-family: inherit; transition: filter 0.15s;
     }
-    button:hover { background: var(--accent-hover); }
+    button:hover { filter: brightness(0.94); }
     .error-msg {
-      background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); color: var(--error);
-      padding: 10px 14px; border-radius: 8px; font-size: 0.84rem; margin-bottom: 18px;
+      background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.35); color: #f87171;
+      padding: 10px 14px; border-radius: var(--radius-sm); font-size: 0.84rem; margin-bottom: 20px;
     }
   </style>
 </head>
-<body>
+<body class="dashboard-body">
   <div class="login-card">
-    <div class="logo">⚡ Bot <span>Arcanjo</span></div>
+    <img class="login-logo" src="/img/logo-white.png" alt="Miguel Arcanjo Advocacia" />
     <div class="subtitle">Acesso restrito ao painel</div>
     ${error ? `<div class="error-msg">${escapeHtml(error)}</div>` : ""}
     <form method="POST" action="/login">
