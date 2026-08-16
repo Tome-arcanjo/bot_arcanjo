@@ -69,7 +69,7 @@
 }
 
 .thread-msg.assistant {
-  background: var(--brand-dark);
+  background: var(--brand-gold-soft);
   color: var(--text-on-dark);
   margin-left: auto;
   border-left: 3px solid var(--brand-gold);

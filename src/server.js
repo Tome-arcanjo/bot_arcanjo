@@ -65,12 +65,16 @@ app.use(
 // autenticação abaixo, senão ninguém conseguiria nem chegar à tela de login.
 app.use(authRoutes);
 
+// Arquivos estáticos (css/js/imagens) também precisam ficar acessíveis ANTES
+// do bloqueio de autenticação: a própria tela de login depende de
+// /css/brand.css e /img/logo-white.png para renderizar, e eles não têm
+// nenhum dado sensível — não há problema em servi-los sem login.
+app.use(express.static(path.join(__dirname, "../public")));
+
 // A partir daqui, tudo exige login — exceto o webhook do WhatsApp (ver
 // src/middleware/auth.js), que é protegido separadamente pela validação de
 // assinatura da Meta.
 app.use(requireAuth);
-
-app.use(express.static(path.join(__dirname, "../public")));
 
 // Log de requisições (simplificado para produção)
 app.use((req, res, next) => {
