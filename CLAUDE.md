@@ -19,22 +19,30 @@ bot_arcanjo/
 ├── src/
 │   ├── server.js                  # Entry point — Express app, rotas, boot
 │   ├── controllers/
-│   │   ├── chatController.js      # Lida com requisições REST do chat web
 │   │   ├── whatsappController.js  # Webhook do WhatsApp (verificação + mensagens)
-│   │   └── adminController.js     # Dashboard admin (HTML gerado no servidor)
+│   │   └── dashboardController.js # Páginas do painel (Configurações, CRM, Conversas, Contatos, Canais)
 │   ├── services/
 │   │   ├── chatService.js         # Lógica de negócio: sessões, mensagens, chamada de IA
-│   │   └── whatsappService.js     # Envio de mensagens de volta ao WhatsApp
+│   │   ├── whatsappService.js     # Envio de mensagens de volta ao WhatsApp
+│   │   ├── clientsService.js      # CRUD da tabela de contatos (clients)
+│   │   └── crmClassifierService.js # Classificação de casos + extração de contato via IA
 │   ├── providers/
 │   │   ├── anthropic.js           # Wrapper para Anthropic SDK (Claude)
 │   │   └── openai.js              # Wrapper para OpenAI SDK
 │   ├── database/
 │   │   └── db.js                  # Inicialização e singleton do cliente Supabase
+│   ├── views/
+│   │   └── dashboardLayout.js     # Layout compartilhado do painel (sidebar, topbar, tema)
 │   ├── routes/
-│   │   ├── chat.js                # Rotas REST: /api/chat/*
+│   │   ├── auth.js                # Rotas: /login, /logout
+│   │   ├── contatosRoutes.js      # Rotas: /api/contatos
+│   │   ├── conversasRoutes.js     # Rotas: /api/conversas
+│   │   ├── crmRoutes.js           # Rotas: /api/crm
+│   │   ├── settingsRoutes.js      # Rotas: /api/settings (personalidade do bot)
 │   │   └── whatsapp.js            # Rotas: GET/POST /webhook/whatsapp
-│   └── middleware/                # (pasta reservada para middlewares futuros)
-├── public/                        # Frontend estático (HTML/CSS/JS)
+│   └── middleware/
+│       └── auth.js                # requireAuth — bloqueia o painel para quem não fez login
+├── public/                        # Frontend estático (CSS/JS/imagens do painel)
 ├── data/                          # Dados locais (se houver)
 ├── logs/                          # Logs do PM2 (out.log, error.log)
 ├── init.sql                       # Script SQL para criar tabelas no Supabase
@@ -69,20 +77,26 @@ bot_arcanjo/
 
 ## Rotas da API
 
-### Chat Web (`/api/chat`)
-- `POST /api/chat/session` — Cria nova sessão de conversa
-- `GET  /api/chat/sessions` — Lista todas as sessões
-- `DELETE /api/chat/session/:id` — Deleta uma sessão
-- `GET  /api/chat/session/:id/messages` — Busca mensagens de uma sessão
-- `POST /api/chat/message` — Envia mensagem e recebe resposta da IA
-
 ### WhatsApp (`/webhook/whatsapp`)
 - `GET  /webhook/whatsapp` — Verificação do webhook pela Meta
 - `POST /webhook/whatsapp` — Recebe mensagens de usuários do WhatsApp
 
-### Admin / Frontend
-- `GET /admin` — Dashboard administrativo (HTML server-side)
-- `GET /` — Interface web (serve `public/index.html`)
+### Painel administrativo (`/dashboard/*`, exige login)
+- `GET /` — Redireciona para `/dashboard`
+- `GET /dashboard` — Redireciona para a aba padrão (`/dashboard/conversas`)
+- `GET /dashboard/configuracoes` — Personalidade do bot
+- `GET /dashboard/crm` — CRM (Kanban de casos, com drag-and-drop)
+- `GET /dashboard/conversas` — Inbox de conversas por cliente
+- `GET /dashboard/contatos` — Lista de clientes (dados capturados automaticamente pela IA)
+- `GET /dashboard/canais` — Tabela de mensagens/canais (antigo `/admin`)
+- `GET /admin` — Mantido só como redirecionamento de compatibilidade para `/dashboard/canais`
+- `GET /login`, `POST /login`, `GET /logout` — Autenticação (ver `src/routes/auth.js`)
+
+### APIs do painel
+- `/api/settings` — Personalidade do bot (usado pela aba Configurações)
+- `/api/crm` — Casos do CRM (listar, mudar status)
+- `/api/contatos` — Lista/busca de clientes
+- `/api/conversas` — Sessões e mensagens (usado pela aba Conversas)
 
 ---
 
@@ -117,20 +131,22 @@ Schema definido em `init.sql`. Duas tabelas principais:
 ## Fluxo Principal de Mensagem
 
 ```
-Cliente (web ou WhatsApp)
+Cliente (WhatsApp)
   ↓
-Controller (chatController / whatsappController)
+whatsappController.js
   ↓
 chatService.processMessage()
   ↓
 callAIProvider() → anthropic.js | openai.js
+  ↓
+crmClassifierService (fire-and-forget: classifica caso + extrai contato)
   ↓
 Salva resposta no Supabase
   ↓
 Retorna resposta ao cliente
 ```
 
-Para WhatsApp: após receber a resposta, `whatsappService.js` envia a mensagem de volta via API da Meta.
+Após receber a resposta, `whatsappService.js` envia a mensagem de volta via API da Meta. O painel (`/dashboard/*`) lê os mesmos dados (`sessions`, `messages`, `crm_cases`, `clients`) via as APIs REST listadas acima — não há mais interface de chat web de teste (removida junto com o restante da primeira versão do projeto).
 
 ---
 

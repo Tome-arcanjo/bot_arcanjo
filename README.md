@@ -8,9 +8,8 @@ Chatbot inteligente com suporte a múltiplos provedores de IA (OpenAI e Anthropi
 
 - ✅ **Múltiplos provedores de IA**: OpenAI (GPT) e Anthropic (Claude)
 - ✅ **Histórico de conversas**: Persistência no Supabase (PostgreSQL)
-- ✅ **Interface web**: Dashboard intuitivo para conversas
 - ✅ **Integração WhatsApp**: Recebe e envia mensagens via Meta WhatsApp Business API
-- ✅ **Dashboard admin**: Gerenciamento de conversas
+- ✅ **Painel administrativo**: Configurações do bot, CRM (Kanban com drag-and-drop), inbox de conversas, lista de contatos e canais — protegido por login
 - ✅ **Escalável**: Pronto para produção com PM2
 
 **Stack técnico:**
@@ -28,25 +27,30 @@ bot_arcanjo/
 ├── src/
 │   ├── server.js                    # Entry point — Express app e rotas
 │   ├── controllers/
-│   │   ├── chatController.js        # Chat web (REST API)
 │   │   ├── whatsappController.js    # Webhook do WhatsApp
-│   │   └── adminController.js       # Dashboard admin
+│   │   └── dashboardController.js   # Páginas do painel (Configurações, CRM, Conversas, Contatos, Canais)
 │   ├── services/
 │   │   ├── chatService.js           # Lógica de negócio (sessões, mensagens, IA)
-│   │   └── whatsappService.js       # Envio de mensagens WhatsApp
+│   │   ├── whatsappService.js       # Envio de mensagens WhatsApp
+│   │   ├── clientsService.js        # CRUD da tabela de contatos (clients)
+│   │   └── crmClassifierService.js  # Classificação de casos + extração de contato via IA
 │   ├── providers/
 │   │   ├── anthropic.js             # Wrapper Anthropic/Claude
 │   │   └── openai.js                # Wrapper OpenAI
 │   ├── database/
 │   │   └── db.js                    # Cliente Supabase (singleton)
+│   ├── views/
+│   │   └── dashboardLayout.js       # Layout compartilhado do painel
 │   ├── routes/
-│   │   ├── chat.js                  # Rotas /api/chat/*
+│   │   ├── auth.js                  # Rotas /login, /logout
+│   │   ├── contatosRoutes.js        # Rotas /api/contatos
+│   │   ├── conversasRoutes.js       # Rotas /api/conversas
+│   │   ├── crmRoutes.js             # Rotas /api/crm
+│   │   ├── settingsRoutes.js        # Rotas /api/settings
 │   │   └── whatsapp.js              # Rotas /webhook/whatsapp
-│   └── middleware/                  # Middlewares (reservado)
-├── public/                          # Frontend estático (HTML/CSS/JS)
-│   ├── index.html                   # Interface web
-│   ├── css/style.css                # Estilos
-│   └── js/app.js                    # Lógica client-side
+│   └── middleware/
+│       └── auth.js                  # requireAuth — protege o painel
+├── public/                          # Frontend estático do painel (CSS/JS/imagens)
 ├── init.sql                         # Script SQL para criar tabelas
 ├── ecosystem.config.cjs             # Configuração PM2
 ├── .env                             # Variáveis de ambiente (não commitar)
@@ -59,16 +63,6 @@ bot_arcanjo/
 
 ## 🔌 API REST
 
-### Chat Web (`/api/chat`)
-
-| Método | Rota | Descrição |
-|--------|------|-----------|
-| `POST` | `/api/chat/session` | Cria nova sessão de conversa |
-| `GET` | `/api/chat/sessions` | Lista todas as sessões |
-| `DELETE` | `/api/chat/session/:id` | Deleta uma sessão |
-| `GET` | `/api/chat/session/:id/messages` | Busca mensagens da sessão |
-| `POST` | `/api/chat/message` | Envia mensagem e recebe resposta |
-
 ### WhatsApp (`/webhook/whatsapp`)
 
 | Método | Rota | Descrição |
@@ -76,12 +70,29 @@ bot_arcanjo/
 | `GET` | `/webhook/whatsapp` | Verificação webhook (Meta) |
 | `POST` | `/webhook/whatsapp` | Recebe mensagens do WhatsApp |
 
-### Admin & Frontend
+### Painel administrativo (`/dashboard/*`, exige login)
 
 | Método | Rota | Descrição |
 |--------|------|-----------|
-| `GET` | `/admin` | Dashboard administrativo |
-| `GET` | `/` | Interface web principal |
+| `GET` | `/` | Redireciona para `/dashboard` |
+| `GET` | `/dashboard` | Redireciona para a aba padrão (`/dashboard/conversas`) |
+| `GET` | `/dashboard/configuracoes` | Personalidade do bot |
+| `GET` | `/dashboard/crm` | CRM (Kanban de casos, drag-and-drop) |
+| `GET` | `/dashboard/conversas` | Inbox de conversas por cliente |
+| `GET` | `/dashboard/contatos` | Lista de clientes (captura automática via IA) |
+| `GET` | `/dashboard/canais` | Tabela de mensagens (antigo `/admin`) |
+| `GET` | `/admin` | Redirecionamento de compatibilidade para `/dashboard/canais` |
+| `GET`/`POST` | `/login` | Autenticação |
+| `GET` | `/logout` | Encerra a sessão |
+
+### APIs do painel
+
+| Rota | Descrição |
+|------|-----------|
+| `/api/settings` | Personalidade do bot |
+| `/api/crm` | Casos do CRM (listar, mudar status) |
+| `/api/contatos` | Lista/busca de clientes |
+| `/api/conversas` | Sessões e mensagens |
 
 ---
 
@@ -116,20 +127,24 @@ bot_arcanjo/
 ## 💬 Fluxo de Mensagem
 
 ```
-Cliente (Web ou WhatsApp)
+Cliente (WhatsApp)
     ↓
-Controller (chatController / whatsappController)
+whatsappController.js
     ↓
 chatService.processMessage()
     ↓
 callAIProvider() → anthropic.js | openai.js
     ↓
+crmClassifierService (fire-and-forget: classifica caso + extrai contato)
+    ↓
 Salva resposta em Supabase
     ↓
 Retorna resposta ao cliente
     ↓
-(WhatsApp) whatsappService.js envia via Meta API
+whatsappService.js envia via Meta API
 ```
+
+O painel (`/dashboard/*`) lê os mesmos dados (`sessions`, `messages`, `crm_cases`, `clients`) pelas APIs REST listadas acima. Não há mais interface de chat web de teste — ela foi removida junto com o restante da primeira versão do projeto.
 
 ---
 

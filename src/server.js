@@ -4,7 +4,6 @@ import cors from "cors";
 import session from "express-session";
 import path from "path";
 import { fileURLToPath } from "url";
-import chatRoutes from "./routes/chat.js";
 import whatsappRoutes from "./routes/whatsapp.js";
 import settingsRoutes from "./routes/settingsRoutes.js";
 import crmRoutes from "./routes/crmRoutes.js";
@@ -89,7 +88,6 @@ app.use((req, res, next) => {
 });
 
 // ── Rotas da API ──
-app.use("/api/chat", chatRoutes);
 app.use("/api/settings", settingsRoutes);
 app.use("/api/crm", crmRoutes);
 app.use("/api/contatos", contatosRoutes);
@@ -107,10 +105,12 @@ app.get("/dashboard/conversas", conversasView);
 app.get("/dashboard/contatos", contatosView);
 app.get("/dashboard/canais", canaisView);
 
-// ── Interface Web (chat de teste) ──
-app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "../public/index.html"));
-});
+// ── Landing (raiz do domínio) ──
+// A raiz do site agora vai direto pro painel — a antiga interface de chat de
+// teste (public/index.html) foi removida junto com o restante das rotas
+// mortas da primeira versão do projeto (ver /admin logo acima, que também só
+// existe como redirecionamento de compatibilidade).
+app.get("/", (req, res) => res.redirect("/dashboard"));
 
 // ── Handler de erros não tratados ──
 app.use((err, req, res, next) => {
