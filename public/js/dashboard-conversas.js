@@ -79,5 +79,41 @@
     threadEl.scrollTop = threadEl.scrollHeight;
   }
 
+  function appendMessageToThread(m) {
+    if (threadEl.querySelector('.dash-empty')) {
+      threadEl.innerHTML = "";
+    }
+    const time = new Date(m.created_at).toLocaleString("pt-BR");
+    const cls = m.role === "user" ? "user" : "assistant";
+    const msgHtml = `<div class="thread-msg ${cls}">${escapeHtml(m.content)}<div class="thread-msg-time">${time}</div></div>`;
+    threadEl.insertAdjacentHTML("beforeend", msgHtml);
+    threadEl.scrollTop = threadEl.scrollHeight;
+  }
+
+  // Configuração do SSE para atualizações em tempo real
+  const evtSource = new EventSource("/api/conversas/stream");
+  evtSource.onmessage = function (event) {
+    const data = JSON.parse(event.data);
+    const { message, session } = data;
+
+    // Atualiza a lista de conversas
+    let sessionIndex = cachedSessions.findIndex((s) => s.id === session.id);
+    if (sessionIndex !== -1) {
+      cachedSessions[sessionIndex].lastMessage = message;
+      // Move a sessão para o topo da lista
+      const [updatedSession] = cachedSessions.splice(sessionIndex, 1);
+      cachedSessions.unshift(updatedSession);
+      renderList(cachedSessions);
+    } else {
+      // Sessão nova (não estava no cache), recarrega a lista toda
+      loadConversas();
+    }
+
+    // Se for a sessão aberta no momento, adiciona a mensagem na tela
+    if (activeSessionId === session.id) {
+      appendMessageToThread(message);
+    }
+  };
+
   loadConversas();
 })();
