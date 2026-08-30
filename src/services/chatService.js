@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from "uuid";
 import { getCaseByPhone } from "./crmService.js";
 import { classifyAndUpdateCrmCase } from "./crmClassifierService.js";
 import { getSettings } from "./settingsService.js";
+import eventBus from "../utils/events.js";
 import "dotenv/config";
 
 const DEFAULT_PROVIDER = process.env.AI_PROVIDER || "openai";
@@ -151,6 +152,18 @@ export async function processMessage(sessionId, userContent, provider, systemPro
   });
   if (insertUserError) throw new Error(insertUserError.message);
 
+  // Emite evento para o SSE (painel em tempo real)
+  eventBus.emit("newMessage", {
+    message: {
+      id: userMessageId,
+      session_id: sessionId,
+      role: "user",
+      content: userContent,
+      created_at: new Date().toISOString(),
+    },
+    session
+  });
+
   // --- CLASSIFICAÇÃO AUTOMÁTICA DO CRM ---
   // Roda em segundo plano (sem "await") para não atrasar a resposta ao
   // cliente. A IA aqui só classifica (resumo/urgência/área) — nunca move
@@ -212,6 +225,18 @@ export async function processMessage(sessionId, userContent, provider, systemPro
     content: assistantContent,
   });
   if (insertAssistantError) throw new Error(insertAssistantError.message);
+
+  // Emite evento para o SSE (painel em tempo real)
+  eventBus.emit("newMessage", {
+    message: {
+      id: assistantMessageId,
+      session_id: sessionId,
+      role: "assistant",
+      content: assistantContent,
+      created_at: new Date().toISOString(),
+    },
+    session
+  });
 
   // Conta mensagens para decidir se atualiza o titulo
   const { count, error: countError } = await db
