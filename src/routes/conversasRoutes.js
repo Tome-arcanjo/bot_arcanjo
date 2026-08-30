@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { getDb } from "../database/db.js";
 import { listSessions, getSessionMessages } from "../services/chatService.js";
+import eventBus from "../utils/events.js";
 
 const router = Router();
 
@@ -47,6 +48,25 @@ router.get("/:sessionId/messages", async (req, res) => {
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
+});
+
+// GET /api/conversas/stream — SSE para atualizações em tempo real
+router.get("/stream", (req, res) => {
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+  });
+
+  const sendEvent = (data) => {
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+
+  eventBus.on("newMessage", sendEvent);
+
+  req.on("close", () => {
+    eventBus.off("newMessage", sendEvent);
+  });
 });
 
 export default router;
