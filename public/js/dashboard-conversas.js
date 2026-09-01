@@ -23,8 +23,38 @@
       if (!json.success) throw new Error(json.error);
       cachedSessions = json.data || [];
       renderList(cachedSessions);
+      openFromDeepLinkIfNeeded();
     } catch (e) {
       listEl.innerHTML = `<p class="dash-empty">Erro ao carregar conversas.</p>`;
+    }
+  }
+
+  // Compara só os dígitos: o WhatsApp grava o telefone da sessão sem
+  // formatação (ex: "5511999999999"), mas um caso criado manualmente no
+  // CRM pode ter sido digitado como "+55 11 99999-9999" — sem isso, o link
+  // não encontraria a conversa correspondente.
+  function onlyDigits(value) {
+    return String(value || "").replace(/\D/g, "");
+  }
+
+  // Suporta chegar aqui vindo de outra tela (ex: clicando num caso no CRM)
+  // via /dashboard/conversas?phone=5511999999999 — como um "router por id"
+  // simples usando o telefone, que é a chave em comum entre as duas telas.
+  function openFromDeepLinkIfNeeded() {
+    const phone = new URLSearchParams(window.location.search).get("phone");
+    if (!phone || activeSessionId) return; // sem link, ou já tem conversa aberta manualmente
+
+    const targetDigits = onlyDigits(phone);
+    const match = cachedSessions.find((s) => onlyDigits(s.phone) === targetDigits);
+    if (match) {
+      selectSession(match);
+      // Limpa o parâmetro da URL pra um refresh depois não reabrir sempre
+      // essa mesma conversa por engano.
+      const url = new URL(window.location);
+      url.searchParams.delete("phone");
+      window.history.replaceState({}, "", url);
+    } else {
+      threadEl.innerHTML = `<p class="dash-empty">Esse caso ainda não tem nenhuma conversa registrada com o número ${escapeHtml(phone)}.</p>`;
     }
   }
 

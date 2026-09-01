@@ -60,6 +60,7 @@
         card.className = "crm-card";
         card.draggable = true;
         card.dataset.id = c.id;
+        card.title = "Ver conversa com esse cliente";
         card.innerHTML = `
           <button type="button" class="crm-card-delete" draggable="false" title="Excluir caso">✕</button>
           <div class="crm-card-title">${escapeHtml(c.client_name || "Sem nome")}</div>
@@ -71,12 +72,25 @@
           </div>
         `;
 
+        // Distingue "arrastei o card" de "cliquei no card": um drag real não
+        // deve navegar pra Conversas quando soltar.
+        let dragOccurred = false;
+
         card.addEventListener("dragstart", (e) => {
+          dragOccurred = true;
           card.classList.add("dragging");
           e.dataTransfer.setData("text/plain", c.id);
           e.dataTransfer.effectAllowed = "move";
         });
-        card.addEventListener("dragend", () => card.classList.remove("dragging"));
+        card.addEventListener("dragend", () => {
+          card.classList.remove("dragging");
+          setTimeout(() => { dragOccurred = false; }, 0);
+        });
+
+        card.addEventListener("click", () => {
+          if (dragOccurred) return;
+          goToConversation(c.phone);
+        });
 
         const deleteBtn = card.querySelector(".crm-card-delete");
         deleteBtn.addEventListener("mousedown", (e) => e.stopPropagation());
@@ -104,6 +118,14 @@
 
       board.appendChild(col);
     });
+  }
+
+  // Leva pra tela de Conversas já com a conversa desse telefone aberta —
+  // funciona como um "router por id" simples via query string, resolvido
+  // do lado de dashboard-conversas.js.
+  function goToConversation(phone) {
+    if (!phone) return;
+    window.location.href = "/dashboard/conversas?phone=" + encodeURIComponent(phone);
   }
 
   async function moveCase(caseId, newStatus) {
