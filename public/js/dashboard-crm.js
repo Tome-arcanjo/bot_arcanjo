@@ -61,6 +61,7 @@
         card.draggable = true;
         card.dataset.id = c.id;
         card.innerHTML = `
+          <button type="button" class="crm-card-delete" draggable="false" title="Excluir caso">✕</button>
           <div class="crm-card-title">${escapeHtml(c.client_name || "Sem nome")}</div>
           <div class="crm-card-phone">${escapeHtml(c.phone)}</div>
           ${c.summary ? `<div class="crm-card-summary">${escapeHtml(c.summary)}</div>` : ""}
@@ -76,6 +77,13 @@
           e.dataTransfer.effectAllowed = "move";
         });
         card.addEventListener("dragend", () => card.classList.remove("dragging"));
+
+        const deleteBtn = card.querySelector(".crm-card-delete");
+        deleteBtn.addEventListener("mousedown", (e) => e.stopPropagation());
+        deleteBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          removeCase(c.id, c.client_name || c.phone);
+        });
 
         col.appendChild(card);
       });
@@ -121,6 +129,97 @@
       renderBoard();
       alert("Não foi possível mover o caso. Tente novamente.");
     }
+  }
+
+  async function removeCase(caseId, label) {
+    const confirmed = confirm(`Excluir o caso de "${label}"? Essa ação não pode ser desfeita.`);
+    if (!confirmed) return;
+
+    // Remove otimisticamente da tela; se a chamada falhar, coloca de volta.
+    const index = cases.findIndex((c) => c.id === caseId);
+    if (index === -1) return;
+    const [removed] = cases.splice(index, 1);
+    renderBoard();
+
+    try {
+      const res = await fetch(`/api/crm/cases/${caseId}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Falha ao excluir");
+    } catch (e) {
+      cases.splice(index, 0, removed);
+      renderBoard();
+      alert("Não foi possível excluir o caso. Tente novamente.");
+    }
+  }
+
+  // ── Modal "Novo caso" ────────────────────────────────────────────────
+  const overlay = document.getElementById("novoCasoOverlay");
+  const btnAbrir = document.getElementById("btnNovoCaso");
+  const btnFechar = document.getElementById("novoCasoClose");
+  const btnCancelar = document.getElementById("novoCasoCancelar");
+  const btnSalvar = document.getElementById("novoCasoSalvar");
+  const inputPhone = document.getElementById("novoCasoPhone");
+  const inputNome = document.getElementById("novoCasoNome");
+  const inputResumo = document.getElementById("novoCasoResumo");
+  const erroEl = document.getElementById("novoCasoErro");
+
+  function abrirModal() {
+    inputPhone.value = "";
+    inputNome.value = "";
+    inputResumo.value = "";
+    erroEl.style.display = "none";
+    overlay.classList.add("open");
+    inputPhone.focus();
+  }
+
+  function fecharModal() {
+    overlay.classList.remove("open");
+  }
+
+  if (btnAbrir) btnAbrir.addEventListener("click", abrirModal);
+  if (btnFechar) btnFechar.addEventListener("click", fecharModal);
+  if (btnCancelar) btnCancelar.addEventListener("click", fecharModal);
+  if (overlay) {
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) fecharModal();
+    });
+  }
+
+  if (btnSalvar) {
+    btnSalvar.addEventListener("click", async () => {
+      const phone = inputPhone.value.trim();
+      if (!phone) {
+        erroEl.textContent = "Informe o telefone do cliente.";
+        erroEl.style.display = "block";
+        return;
+      }
+
+      btnSalvar.disabled = true;
+      btnSalvar.textContent = "Criando...";
+
+      try {
+        const res = await fetch("/api/crm/cases", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            phone,
+            clientName: inputNome.value.trim(),
+            summary: inputResumo.value.trim(),
+          }),
+        });
+        const json = await res.json();
+        if (!json.success) throw new Error(json.error || "Erro ao criar caso");
+
+        cases.unshift(json.data);
+        renderBoard();
+        fecharModal();
+      } catch (e) {
+        erroEl.textContent = e.message || "Não foi possível criar o caso.";
+        erroEl.style.display = "block";
+      } finally {
+        btnSalvar.disabled = false;
+        btnSalvar.textContent = "Criar caso";
+      }
+    });
   }
 
   loadCases();

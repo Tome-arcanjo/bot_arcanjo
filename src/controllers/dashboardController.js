@@ -111,12 +111,40 @@ export function crmView(req, res) {
     <div id="crmBoard" class="crm-board">
       <p class="dash-empty">Carregando casos...</p>
     </div>
+
+    <div class="modal-overlay" id="novoCasoOverlay">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h2>Novo caso</h2>
+          <button type="button" class="modal-close" id="novoCasoClose">✕</button>
+        </div>
+        <div class="modal-body">
+          <label class="field-label" for="novoCasoPhone">Telefone (WhatsApp) *</label>
+          <input type="text" id="novoCasoPhone" class="field-input" placeholder="+55 11 99999-9999" />
+
+          <label class="field-label" for="novoCasoNome" style="margin-top:14px;">Nome do cliente</label>
+          <input type="text" id="novoCasoNome" class="field-input" placeholder="Nome completo" />
+
+          <label class="field-label" for="novoCasoResumo" style="margin-top:14px;">Resumo do caso</label>
+          <textarea id="novoCasoResumo" class="field-textarea" rows="4" placeholder="Breve descrição do caso..."></textarea>
+
+          <p id="novoCasoErro" class="modal-error" style="display:none;"></p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" id="novoCasoCancelar">Cancelar</button>
+          <button type="button" class="btn btn-primary" id="novoCasoSalvar">Criar caso</button>
+        </div>
+      </div>
+    </div>
+
     <script src="/js/dashboard-crm.js"></script>
   `;
+  const topbarActions = `<button type="button" class="btn btn-primary" id="btnNovoCaso">+ Novo caso</button>`;
   res.send(renderDashboardLayout({
     active: "crm",
     title: "CRM",
     content,
+    topbarActions,
     extraHead: `<link rel="stylesheet" href="/css/dashboard-crm.css" />`,
   }));
 }

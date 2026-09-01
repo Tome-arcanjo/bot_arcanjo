@@ -92,3 +92,15 @@ export async function updateCaseTags(id, urgencyTag, areaTag) {
   }
   return data;
 }
+
+// Exclui um caso permanentemente (ação manual do usuário, via botão no CRM)
+export async function deleteCase(id) {
+  const supabase = getDb();
+  const { error } = await supabase.from("crm_cases").delete().eq("id", id);
+
+  if (error) {
+    console.error("[CRM] Erro ao excluir caso " + id + ":", error);
+    return false;
+  }
+  return true;
+}

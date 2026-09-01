@@ -1,5 +1,5 @@
 ﻿import { Router } from "express";
-import { getCases, createCase, updateCaseStatus, updateCaseTags } from "../services/crmService.js";
+import { getCases, createCase, updateCaseStatus, updateCaseTags, deleteCase } from "../services/crmService.js";
 
 const router = Router();
 
@@ -15,10 +15,31 @@ router.get("/cases", async (req, res) => {
 
 // Cria um novo caso manualmente no painel
 router.post("/cases", async (req, res) => {
-  const { phone, clientName, summary } = req.body;
+  const { phone, clientName, summary } = req.body || {};
+  const cleanPhone = typeof phone === "string" ? phone.trim() : "";
+  if (!cleanPhone) {
+    return res.status(400).json({ success: false, error: "Telefone é obrigatório." });
+  }
   try {
-    const newCase = await createCase(phone, clientName, summary);
+    const newCase = await createCase(cleanPhone, (clientName || "").trim(), (summary || "").trim());
+    if (!newCase) {
+      return res.status(500).json({ success: false, error: "Não foi possível criar o caso." });
+    }
     res.json({ success: true, data: newCase });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Exclui um caso permanentemente
+router.delete("/cases/:id", async (req, res) => {
+  const { id } = req.params;
+  try {
+    const ok = await deleteCase(id);
+    if (!ok) {
+      return res.status(500).json({ success: false, error: "Não foi possível excluir o caso." });
+    }
+    res.json({ success: true });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
