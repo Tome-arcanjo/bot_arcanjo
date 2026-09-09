@@ -73,7 +73,7 @@ export function renderDashboardLayout({ active, title, content, extraHead = "", 
 
     <div class="dash-main">
       <header class="dash-topbar">
-        <button type="button" class="dash-back-btn" onclick="history.length > 1 ? history.back() : (window.location.href = '/dashboard')" title="Voltar" aria-label="Voltar">
+        <button type="button" class="dash-back-btn" onclick="window.location.href = '/dashboard/crm'" title="Voltar" aria-label="Voltar">
           ${ICONS.back}
         </button>
         <h1>${escapeHtml(title)}</h1>
