@@ -18,7 +18,7 @@ const ICONS = {
 
 export const NAV_ITEMS = [
   { key: "configuracoes", href: "/dashboard/configuracoes", label: "Configurações", icon: ICONS.settings },
-  { key: "crm", href: "/dashboard/crm", label: "CRM", icon: ICONS.crm },
+  { key: "crm", href: "/dashboard/crm", label: "Dashboard", icon: ICONS.crm },
   { key: "conversas", href: "/dashboard/conversas", label: "Conversas", icon: ICONS.conversas },
   { key: "contatos", href: "/dashboard/contatos", label: "Contatos", icon: ICONS.contatos },
   { key: "canais", href: "/dashboard/canais", label: "Canais", icon: ICONS.canais },
