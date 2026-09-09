@@ -40,8 +40,9 @@ function escapeHtml(str) {
  * @param {string} [opts.extraHead] - tags extras para dentro do <head> (ex: <style> específico da página)
  * @param {string} [opts.topbarActions] - HTML de botões extras na barra superior, à direita
  * @param {string} [opts.bodyClass] - classes extras aplicadas ao <body>
+ * @param {boolean} [opts.hideBack] - se true, omite o botão de voltar da topbar
  */
-export function renderDashboardLayout({ active, title, content, extraHead = "", topbarActions = "", bodyClass = "" }) {
+export function renderDashboardLayout({ active, title, content, extraHead = "", topbarActions = "", bodyClass = "", hideBack = false }) {
   const navHtml = NAV_ITEMS.map((item) => {
     const activeClass = item.key === active ? " active" : "";
     return `<a href="${item.href}" class="dash-nav-item${activeClass}">${item.icon}<span class="label">${escapeHtml(item.label)}</span></a>`;
@@ -73,9 +74,7 @@ export function renderDashboardLayout({ active, title, content, extraHead = "", 
 
     <div class="dash-main">
       <header class="dash-topbar">
-        <button type="button" class="dash-back-btn" onclick="window.location.href = '/dashboard/crm'" title="Voltar" aria-label="Voltar">
-          ${ICONS.back}
-        </button>
+        ${hideBack ? `` : `<button type="button" class="dash-back-btn" onclick="window.location.href = '/dashboard/crm'" title="Voltar" aria-label="Voltar">${ICONS.back}</button>`}
         <h1>${escapeHtml(title)}</h1>
         <div class="dash-topbar-actions">${topbarActions}</div>
       </header>

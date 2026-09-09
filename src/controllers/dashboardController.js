@@ -146,6 +146,7 @@ export function crmView(req, res) {
     content,
     topbarActions,
     extraHead: `<link rel="stylesheet" href="/css/dashboard-crm.css" />`,
+    hideBack: true,
   }));
 }
 
