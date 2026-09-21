@@ -1,0 +1,72 @@
+/* Faixas de "ligação atrasada" — aparecem em todas as telas do painel. */
+.call-toasts {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 90; /* abaixo dos modais (100) */
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(360px, calc(100vw - 40px));
+  pointer-events: none;
+}
+
+.call-toast {
+  position: relative;
+  pointer-events: auto;
+  background: var(--bg-card);
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  border-left: 4px solid #ef4444;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  padding: 14px 40px 14px 16px;
+}
+
+.call-toast-title {
+  font-weight: 700;
+  font-size: 0.88rem;
+  color: #f87171;
+  margin-bottom: 4px;
+}
+
+.call-toast-body {
+  font-size: 0.82rem;
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+
+.call-toast-meta {
+  margin-top: 6px;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+}
+
+.call-toast-link {
+  display: inline-block;
+  margin-top: 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--brand-gold);
+  text-decoration: none;
+}
+
+.call-toast-link:hover { text-decoration: underline; }
+
+.call-toast-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 100px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.call-toast-close:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+}

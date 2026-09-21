@@ -94,6 +94,8 @@
     const i = cases.findIndex((x) => x.id === updated.id);
     if (i !== -1) cases[i] = updated;
     renderBoard();
+    // Faz o alerta de "ligação atrasada" (dashboard-call-alerts.js) sumir/atualizar na hora.
+    window.dispatchEvent(new Event("call-alerts:refresh"));
   }
 
   function warnIfClientNotNotified(json, verb) {

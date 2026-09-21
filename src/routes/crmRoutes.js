@@ -1,6 +1,6 @@
 ﻿import { Router } from "express";
 import { getCases, createCase, updateCaseStatus, updateCaseTags, deleteCase } from "../services/crmService.js";
-import { scheduleCall, completeCall, cancelCall } from "../services/callService.js";
+import { scheduleCall, completeCall, cancelCall, getOverdueCallAlerts } from "../services/callService.js";
 
 const router = Router();
 
@@ -77,6 +77,16 @@ function sendCallError(res, error) {
   const status = error.status || 500;
   res.status(status).json({ success: false, error: error.message });
 }
+
+// Ligações pendentes já atrasadas (dentro da janela de 3h de avisos) — o painel
+// consulta isto para notificar o admin no navegador.
+router.get("/calls/overdue", async (req, res) => {
+  try {
+    res.json({ success: true, data: await getOverdueCallAlerts() });
+  } catch (error) {
+    sendCallError(res, error);
+  }
+});
 
 // Agenda a ligação — ou remarca, se já houver uma pendente (o cliente é avisado).
 router.put("/cases/:id/call", async (req, res) => {

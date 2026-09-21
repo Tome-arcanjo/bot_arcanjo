@@ -10,9 +10,10 @@ import { recordAssistantMessage } from "./chatService.js";
  * mesma regra do restante do CRM). Este serviço cuida de:
  *  - avisar o CLIENTE, pelo próprio bot, quando o horário é remarcado ou a
  *    ligação é cancelada;
- *  - avisar o ADMIN (WhatsApp, números em CALL_ALERT_PHONES) quando uma ligação
- *    pendente passa do horário: um aviso assim que atrasa e repete a cada
- *    30 minutos por 3 horas.
+ *  - avisar o ADMIN quando uma ligação pendente passa do horário: um aviso assim
+ *    que atrasa, repetido a cada 30 minutos por 3 horas. O aviso principal é no
+ *    NAVEGADOR (public/js/dashboard-call-alerts.js consulta getOverdueCallAlerts);
+ *    opcionalmente também por WhatsApp, se CALL_ALERT_PHONES estiver preenchido.
  */
 
 const TIMEZONE = process.env.APP_TIMEZONE || "America/Sao_Paulo";
@@ -69,7 +70,18 @@ function adminPhones() {
 }
 
 /**
- * Decide se há um aviso de atraso a enviar agora. Função pura (sem I/O).
+ * Em qual "intervalo de aviso" (0 a MAX_REMINDERS-1) uma ligação atrasada está agora,
+ * ou null se ainda não atrasou / já passou da janela de 3h. Função pura.
+ * O intervalo 0 começa no horário marcado; cada um seguinte, 30 min depois.
+ */
+export function currentReminderSlot(scheduledAtMs, nowMs) {
+  const overdueMs = nowMs - scheduledAtMs;
+  if (overdueMs < 0 || overdueMs > REMINDER_CUTOFF_MS) return null;
+  return Math.min(Math.floor(overdueMs / REMINDER_INTERVAL_MS), MAX_REMINDERS - 1);
+}
+
+/**
+ * Decide se há um aviso de atraso a enviar agora por WhatsApp. Função pura (sem I/O).
  *
  * O aviso nº N (N = 1..MAX_REMINDERS) vale a partir de horário + (N-1)*30 min.
  * Se o servidor ficou fora do ar e vários avisos ficaram para trás, sai só UM
@@ -78,12 +90,9 @@ function adminPhones() {
  * @returns {{ newSent: number, overdueMs: number } | null}
  */
 export function computeDueReminder(scheduledAtMs, remindersSent, nowMs) {
-  const overdueMs = nowMs - scheduledAtMs;
-  if (overdueMs < 0 || overdueMs > REMINDER_CUTOFF_MS) return null;
-
-  const slot = Math.min(Math.floor(overdueMs / REMINDER_INTERVAL_MS), MAX_REMINDERS - 1);
-  if (slot < remindersSent) return null; // esse intervalo já foi avisado
-  return { newSent: slot + 1, overdueMs };
+  const slot = currentReminderSlot(scheduledAtMs, nowMs);
+  if (slot === null || slot < remindersSent) return null; // fora da janela, ou esse intervalo já foi avisado
+  return { newSent: slot + 1, overdueMs: nowMs - scheduledAtMs };
 }
 
 /**
@@ -247,6 +256,7 @@ let lastErrorMessage = null;
 /** Uma passada do agendador: envia os avisos de atraso que estiverem vencidos. */
 export async function runReminderCheck(now = Date.now()) {
   if (running) return; // ciclo anterior ainda em andamento
+  if (adminPhones().length === 0) return; // sem WhatsApp configurado: o aviso é só no navegador
   running = true;
 
   try {
@@ -287,7 +297,43 @@ export async function runReminderCheck(now = Date.now()) {
 /** Liga o agendador de avisos de atraso (chamado uma vez no boot do servidor). */
 export function startCallReminderScheduler() {
   if (timer) return;
+  if (adminPhones().length === 0) {
+    console.log("[Ligação] CALL_ALERT_PHONES vazio: avisos de ligação atrasada só no navegador (painel aberto).");
+    return;
+  }
   timer = setInterval(() => runReminderCheck(), CHECK_INTERVAL_MS);
   runReminderCheck(); // já verifica no boot (recupera avisos perdidos durante uma queda)
-  console.log("[Ligação] Agendador de avisos de ligação atrasada iniciado (verifica a cada 1 min).");
+  console.log("[Ligação] Avisos de ligação atrasada por WhatsApp ativos (verifica a cada 1 min).");
+}
+
+// ── Avisos de atraso no navegador ───────────────────────────────────────
+
+/**
+ * Ligações pendentes atrasadas que ainda estão dentro da janela de avisos (3h),
+ * com o "intervalo de aviso" atual de cada uma. O painel consulta isso de tempos
+ * em tempos e dispara uma notificação sempre que o intervalo muda (0, 1, ..., 6),
+ * o que dá um aviso ao atrasar e outro a cada 30 min.
+ */
+export async function getOverdueCallAlerts(now = Date.now()) {
+  const overdue = await getOverdueCalls(
+    new Date(now).toISOString(),
+    new Date(now - REMINDER_CUTOFF_MS).toISOString()
+  );
+
+  return overdue
+    .map((c) => {
+      const scheduledMs = Date.parse(c.call_scheduled_at);
+      const slot = currentReminderSlot(scheduledMs, now);
+      if (slot === null) return null;
+      return {
+        id: c.id,
+        client_name: c.client_name,
+        phone: c.phone,
+        call_scheduled_at: c.call_scheduled_at,
+        overdue_minutes: Math.floor((now - scheduledMs) / 60000),
+        slot,
+        total: MAX_REMINDERS,
+      };
+    })
+    .filter(Boolean);
 }

@@ -73,7 +73,7 @@ bot_arcanjo/
 | `WHATSAPP_TOKEN` | Token da API WhatsApp (Meta) | `EAAxxxxxxx` |
 | `WHATSAPP_PHONE_NUMBER_ID` | ID do número WhatsApp | `12345678` |
 | `WHATSAPP_VERIFY_TOKEN` | Token de verificação do webhook | `meu_token_secreto` |
-| `CALL_ALERT_PHONES` | Números (DDI, só dígitos, separados por vírgula) que recebem o aviso de "ligação atrasada" no WhatsApp | `5511999999999,5511888888888` |
+| `CALL_ALERT_PHONES` | OPCIONAL: números (DDI, só dígitos, vírgula) que também recebem o aviso de "ligação atrasada" no WhatsApp. Vazio = só aviso no navegador | `5511999999999,5511888888888` |
 | `APP_TIMEZONE` | Fuso dos horários nas mensagens de ligação (padrão `America/Sao_Paulo`) | `America/Sao_Paulo` |
 
 ---
@@ -100,6 +100,7 @@ bot_arcanjo/
 - `/api/crm` — Casos do CRM (listar, mudar status, etiquetas, criar/excluir)
   - `PUT /api/crm/cases/:id/call` `{ scheduledAt }` — agenda a ligação; se já houver uma pendente, remarca e o bot avisa o cliente
   - `POST /api/crm/cases/:id/call/complete` — marca a ligação como concluída
+  - `GET /api/crm/calls/overdue` — ligações pendentes atrasadas (janela de 3 h) com o intervalo de aviso atual; alimenta os alertas do navegador
   - `DELETE /api/crm/cases/:id/call` — cancela a ligação e o bot avisa o cliente
 - `/api/contatos` — Lista/busca de clientes
 - `/api/conversas` — Sessões e mensagens (usado pela aba Conversas)
@@ -134,8 +135,9 @@ Schema definido em `init.sql`. Duas tabelas principais:
 O admin agenda a ligação pelo card do caso no CRM (a IA nunca agenda). Colunas: `call_status` (`NULL` | `pendente` | `concluida` — etiquetas "Ligação Pendente" / "Ligação Concluída"), `call_scheduled_at`, `call_completed_at`, `call_reminders_sent`.
 
 - **Remarcar/cancelar**: o bot envia uma mensagem ao cliente pelo WhatsApp e a registra na conversa.
-- **Atraso**: `callService.startCallReminderScheduler()` (iniciado no boot, roda a cada 1 min) avisa os números de `CALL_ALERT_PHONES` assim que a ligação pendente passa do horário e repete a cada 30 min por 3 h (7 avisos no total). Concluir, cancelar ou remarcar encerra/zera os avisos. No CRM o card também fica vermelho ("atrasada") e aparece um banner no topo.
-- Limitação da Meta: texto livre só é entregue a quem falou com o bot nas últimas 24 h; fora disso o envio falha (o painel avisa o admin quando o cliente não pôde ser notificado).
+- **Atraso (aviso principal, no navegador)**: `public/js/dashboard-call-alerts.js` é carregado em todas as telas do painel (via `dashboardLayout.js`), consulta `/api/crm/calls/overdue` a cada 30 s e dispara notificação do sistema + som + faixa na tela quando a ligação passa do horário, repetindo a cada 30 min por 3 h (7 avisos). O último aviso dado fica no `localStorage`, então recarregar/navegar não repete. O admin precisa clicar em "🔔 Ativar alertas" uma vez para liberar as notificações, e alguma aba do painel precisa estar aberta. No CRM o card também fica vermelho ("atrasada") e há um banner no topo.
+- **Atraso (opcional, WhatsApp)**: se `CALL_ALERT_PHONES` estiver preenchido, `callService.startCallReminderScheduler()` (boot, a cada 1 min) também manda o mesmo cronograma de avisos por WhatsApp. Concluir, cancelar ou remarcar encerra/zera os avisos.
+- Limitação da Meta: texto livre só é entregue a quem falou com o bot nas últimas 24 h; fora disso o envio falha (vale para o aviso ao cliente e para `CALL_ALERT_PHONES`; o painel avisa o admin quando o cliente não pôde ser notificado).
 - As colunas vêm de `init.sql` — rode `npm run db:migrate` (ou o SQL no Supabase) ao atualizar.
 
 > **Importante**: O histórico enviado para a IA é limitado às últimas **10 mensagens** da sessão para controlar o uso de tokens.

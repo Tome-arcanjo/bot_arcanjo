@@ -56,6 +56,7 @@ export function renderDashboardLayout({ active, title, content, extraHead = "", 
   <title>${escapeHtml(title)} — Miguel Arcanjo Advocacia</title>
   <link rel="icon" href="/img/symbol-gold.png" />
   <link rel="stylesheet" href="/css/brand.css" />
+  <link rel="stylesheet" href="/css/dashboard-alerts.css" />
   ${extraHead}
 </head>
 <body class="dashboard-body ${bodyClass}">
@@ -83,6 +84,7 @@ export function renderDashboardLayout({ active, title, content, extraHead = "", 
       </main>
     </div>
   </div>
+  <script src="/js/dashboard-call-alerts.js"></script>
 </body>
 </html>`;
 }
