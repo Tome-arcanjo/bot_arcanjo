@@ -11,6 +11,11 @@
   const POLL_MS = 30 * 1000;
   const SEEN_KEY = "callAlertSeenSlots";
   const DISMISSED_KEY = "callAlertDismissedSlots";
+  const LAST_NOTIFIED_KEY = "callAlertLastNotifiedAt";
+  // Espaço mínimo entre duas notificações do sistema (mesmo entre abas). Os avisos
+  // legítimos já saem a cada 30 min; isto só segura rajadas.
+  const MIN_GAP_MS = 60 * 1000;
+  const MAX_TOASTS = 3; // faixas visíveis ao mesmo tempo; o resto vira "e mais N"
 
   const baseTitle = document.title;
   let audioCtx = null;
@@ -102,14 +107,23 @@
   }
 
   // ── notificação do sistema ──
-  function systemNotify(call) {
+  // Sempre UMA notificação por vez, mesmo com várias ligações atrasadas (vira um
+  // resumo), com a mesma "tag" (a nova SUBSTITUI a anterior em vez de empilhar) e
+  // sem requireInteraction (não fica fixa na tela). Rajadas de notificações
+  // incomodam e são o que extensões como o Malwarebytes Browser Guard bloqueiam
+  // como "excesso de notificações".
+  function systemNotify(calls) {
     if (!("Notification" in window) || Notification.permission !== "granted") return;
+
+    const single = calls.length === 1;
+    const title = single ? "⏰ Ligação atrasada" : "⏰ " + calls.length + " ligações atrasadas";
+    const body = single
+      ? describe(calls[0]) + "\nAviso " + (calls[0].slot + 1) + " de " + calls[0].total
+      : calls.slice(0, 3).map((c) => c.client_name || c.phone).join(", ") +
+        (calls.length > 3 ? " e mais " + (calls.length - 3) : "");
+
     try {
-      const n = new Notification("⏰ Ligação atrasada", {
-        body: describe(call) + "\nAviso " + (call.slot + 1) + " de " + call.total,
-        tag: keyOf(call), // o mesmo caso substitui o aviso anterior em vez de empilhar
-        requireInteraction: true,
-      });
+      const n = new Notification(title, { body: body, tag: "call-overdue" });
       n.onclick = () => {
         window.focus();
         window.location.href = "/dashboard/crm";
@@ -123,10 +137,13 @@
     const dismissed = readJson(sessionStorage, DISMISSED_KEY);
     container.innerHTML = "";
 
-    calls.forEach((call) => {
+    const visible = calls.filter((call) => {
       const key = keyOf(call);
-      if (dismissed[key] !== undefined && dismissed[key] >= call.slot) return;
+      return !(dismissed[key] !== undefined && dismissed[key] >= call.slot);
+    });
 
+    visible.slice(0, MAX_TOASTS).forEach((call) => {
+      const key = keyOf(call);
       const toast = document.createElement("div");
       toast.className = "call-toast";
       toast.innerHTML = `
@@ -144,6 +161,14 @@
       });
       container.appendChild(toast);
     });
+
+    if (visible.length > MAX_TOASTS) {
+      const more = document.createElement("div");
+      more.className = "call-toast call-toast-more";
+      more.innerHTML = `<div class="call-toast-body">e mais ${visible.length - MAX_TOASTS} ligação(ões) atrasada(s)</div>
+        <a class="call-toast-link" href="/dashboard/crm">Abrir CRM</a>`;
+      container.appendChild(more);
+    }
   }
 
   function updateTitle(count) {
@@ -151,7 +176,43 @@
   }
 
   // ── consulta ao servidor ──
+  function readLastNotifiedAt() {
+    try {
+      return Number(localStorage.getItem(LAST_NOTIFIED_KEY)) || 0;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  function writeLastNotifiedAt(ms) {
+    try {
+      localStorage.setItem(LAST_NOTIFIED_KEY, String(ms));
+    } catch (e) { /* sem storage */ }
+  }
+
+  let polling = false;
+  let pollAgain = false;
+
+  // Nunca duas consultas ao mesmo tempo (ex.: a de 30 s + o "refresh" do CRM):
+  // duas rodando juntas leriam o mesmo "ainda não avisei" e avisariam em dobro.
   async function poll() {
+    if (polling) {
+      pollAgain = true;
+      return;
+    }
+    polling = true;
+    try {
+      await checkOverdueCalls();
+    } finally {
+      polling = false;
+    }
+    if (pollAgain) {
+      pollAgain = false;
+      poll();
+    }
+  }
+
+  async function checkOverdueCalls() {
     let calls;
     try {
       const res = await fetch("/api/crm/calls/overdue", { cache: "no-store" });
@@ -162,25 +223,36 @@
     } catch (e) {
       return;
     }
-    lastCalls = calls;
 
     const seen = readJson(localStorage, SEEN_KEY);
-    const next = {}; // reescrever só com as ligações ainda atrasadas limpa as antigas
-    const fresh = [];
+    const fresh = calls.filter((call) => {
+      const last = seen[keyOf(call)];
+      return last === undefined || call.slot > last;
+    });
+
+    // Todas as ligações "novas" saem juntas, em UMA notificação — e só se já
+    // passou o espaçamento mínimo desde a última. Se ainda não passou, elas
+    // continuam "novas" e entram no próximo ciclo (a faixa na tela aparece já).
+    const now = Date.now();
+    const notifyNow = fresh.length > 0 && now - readLastNotifiedAt() >= MIN_GAP_MS;
+
+    // Reescrever só com as ligações ainda atrasadas também limpa as antigas.
+    const next = {};
     calls.forEach((call) => {
       const key = keyOf(call);
-      const last = seen[key];
-      next[key] = last === undefined ? call.slot : Math.max(last, call.slot);
-      if (last === undefined || call.slot > last) fresh.push(call);
+      const isNotified = notifyNow && fresh.indexOf(call) !== -1;
+      const value = isNotified ? call.slot : seen[key];
+      if (value !== undefined) next[key] = value;
     });
     writeJson(localStorage, SEEN_KEY, next);
+    if (notifyNow) writeLastNotifiedAt(now);
 
     renderToasts(calls);
     updateTitle(calls.length);
 
-    if (fresh.length > 0) {
+    if (notifyNow) {
       beep();
-      fresh.forEach(systemNotify);
+      systemNotify(fresh);
     }
   }
 
