@@ -184,3 +184,65 @@
   padding: 16px 24px;
   border-top: 1px solid var(--border-soft);
 }
+
+/* ── Ligação com o advogado ── */
+.crm-call-alert {
+  margin-bottom: 14px;
+  padding: 10px 16px;
+  border-radius: var(--radius-sm);
+  background: rgba(239, 68, 68, 0.14);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #f87171;
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.crm-card-call {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.crm-call-time {
+  font-size: 0.74rem;
+  color: var(--text-secondary);
+}
+
+.crm-call-late {
+  color: #f87171;
+  font-weight: 600;
+}
+
+.crm-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.crm-call-btn {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  padding: 3px 9px;
+  border-radius: 100px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.crm-call-btn:hover {
+  border-color: var(--brand-gold);
+  color: var(--text-primary);
+}
+
+.crm-call-btn-danger:hover {
+  border-color: #f87171;
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.1);
+}
+

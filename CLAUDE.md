@@ -25,7 +25,8 @@ bot_arcanjo/
 │   │   ├── chatService.js         # Lógica de negócio: sessões, mensagens, chamada de IA
 │   │   ├── whatsappService.js     # Envio de mensagens de volta ao WhatsApp
 │   │   ├── clientsService.js      # CRUD da tabela de contatos (clients)
-│   │   └── crmClassifierService.js # Classificação de casos + extração de contato via IA
+│   │   ├── crmClassifierService.js # Classificação de casos + extração de contato via IA
+│   │   └── callService.js         # Ligação com o advogado: agendar/remarcar/cancelar/concluir + avisos de atraso
 │   ├── providers/
 │   │   ├── anthropic.js           # Wrapper para Anthropic SDK (Claude)
 │   │   └── openai.js              # Wrapper para OpenAI SDK
@@ -72,6 +73,8 @@ bot_arcanjo/
 | `WHATSAPP_TOKEN` | Token da API WhatsApp (Meta) | `EAAxxxxxxx` |
 | `WHATSAPP_PHONE_NUMBER_ID` | ID do número WhatsApp | `12345678` |
 | `WHATSAPP_VERIFY_TOKEN` | Token de verificação do webhook | `meu_token_secreto` |
+| `CALL_ALERT_PHONES` | Números (DDI, só dígitos, separados por vírgula) que recebem o aviso de "ligação atrasada" no WhatsApp | `5511999999999,5511888888888` |
+| `APP_TIMEZONE` | Fuso dos horários nas mensagens de ligação (padrão `America/Sao_Paulo`) | `America/Sao_Paulo` |
 
 ---
 
@@ -94,7 +97,10 @@ bot_arcanjo/
 
 ### APIs do painel
 - `/api/settings` — Personalidade do bot (usado pela aba Configurações)
-- `/api/crm` — Casos do CRM (listar, mudar status)
+- `/api/crm` — Casos do CRM (listar, mudar status, etiquetas, criar/excluir)
+  - `PUT /api/crm/cases/:id/call` `{ scheduledAt }` — agenda a ligação; se já houver uma pendente, remarca e o bot avisa o cliente
+  - `POST /api/crm/cases/:id/call/complete` — marca a ligação como concluída
+  - `DELETE /api/crm/cases/:id/call` — cancela a ligação e o bot avisa o cliente
 - `/api/contatos` — Lista/busca de clientes
 - `/api/conversas` — Sessões e mensagens (usado pela aba Conversas)
 
@@ -123,6 +129,14 @@ Schema definido em `init.sql`. Duas tabelas principais:
 | `role` | TEXT | `user`, `assistant` ou `system` |
 | `content` | TEXT | Conteúdo da mensagem |
 | `created_at` | TIMESTAMPTZ | — |
+
+### Ligação com o advogado (`crm_cases.call_*`)
+O admin agenda a ligação pelo card do caso no CRM (a IA nunca agenda). Colunas: `call_status` (`NULL` | `pendente` | `concluida` — etiquetas "Ligação Pendente" / "Ligação Concluída"), `call_scheduled_at`, `call_completed_at`, `call_reminders_sent`.
+
+- **Remarcar/cancelar**: o bot envia uma mensagem ao cliente pelo WhatsApp e a registra na conversa.
+- **Atraso**: `callService.startCallReminderScheduler()` (iniciado no boot, roda a cada 1 min) avisa os números de `CALL_ALERT_PHONES` assim que a ligação pendente passa do horário e repete a cada 30 min por 3 h (7 avisos no total). Concluir, cancelar ou remarcar encerra/zera os avisos. No CRM o card também fica vermelho ("atrasada") e aparece um banner no topo.
+- Limitação da Meta: texto livre só é entregue a quem falou com o bot nas últimas 24 h; fora disso o envio falha (o painel avisa o admin quando o cliente não pôde ser notificado).
+- As colunas vêm de `init.sql` — rode `npm run db:migrate` (ou o SQL no Supabase) ao atualizar.
 
 > **Importante**: O histórico enviado para a IA é limitado às últimas **10 mensagens** da sessão para controlar o uso de tokens.
 

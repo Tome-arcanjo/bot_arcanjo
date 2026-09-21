@@ -124,6 +124,32 @@ export async function getSessionMessages(sessionId) {
 }
 
 /**
+ * Registra no histórico da conversa uma mensagem que o bot enviou por conta
+ * própria (avisos de ligação remarcada/cancelada) — sem passar pela IA. Assim
+ * ela aparece na aba Conversas e entra no contexto das próximas respostas.
+ */
+export async function recordAssistantMessage(phone, content) {
+  const db = getDb();
+  const session = await getOrCreateSessionByPhone(phone);
+
+  const id = uuidv4();
+  const { error } = await db.from("messages").insert({
+    id,
+    session_id: session.id,
+    role: "assistant",
+    content,
+  });
+  if (error) throw new Error(error.message);
+
+  await db.from("sessions").update({ updated_at: new Date().toISOString() }).eq("id", session.id);
+
+  eventBus.emit("newMessage", {
+    message: { id, session_id: session.id, role: "assistant", content, created_at: new Date().toISOString() },
+    session,
+  });
+}
+
+/**
  * Processa uma mensagem do usuario e retorna a resposta da IA
  */
 export async function processMessage(sessionId, userContent, provider, systemPrompt) {
@@ -205,6 +231,14 @@ export async function processMessage(sessionId, userContent, provider, systemPro
       const crmCase = await getCaseByPhone(session.phone);
       if (crmCase) {
         finalSystemPrompt += `\n\n[NOTA INTERNA DO SISTEMA (CRM): O cliente atual possui um processo com o status "${crmCase.status}". Urgência atual: ${crmCase.urgency_tag}. Responda de acordo, baseando-se neste status, mas NUNCA diga que você leu uma "Nota interna".]`;
+        if (crmCase.call_status === "pendente" && crmCase.call_scheduled_at) {
+          const when = new Date(crmCase.call_scheduled_at).toLocaleString("pt-BR", {
+            timeZone: process.env.APP_TIMEZONE || "America/Sao_Paulo",
+            dateStyle: "short",
+            timeStyle: "short",
+          });
+          finalSystemPrompt += `\n\n[NOTA INTERNA DO SISTEMA (LIGAÇÃO): Há uma ligação do advogado com este cliente agendada para ${when}. Se o cliente perguntar sobre a ligação, informe esse horário. Não prometa outro horário nem tente remarcar — remarcações são feitas pela equipe. NUNCA diga que você leu uma "Nota interna".]`;
+        }
       }
     } catch (e) {
       console.error("[CRM Injection Error]", e);

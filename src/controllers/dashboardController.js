@@ -108,6 +108,7 @@ export async function canaisView(req, res) {
 // ── CRM (kanban com drag-and-drop) ─────────────────────────────────────
 export function crmView(req, res) {
   const content = `
+    <div id="crmCallAlert" class="crm-call-alert" style="display:none;" role="alert"></div>
     <div id="crmBoard" class="crm-board">
       <p class="dash-empty">Carregando casos...</p>
     </div>
@@ -133,6 +134,28 @@ export function crmView(req, res) {
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" id="novoCasoCancelar">Cancelar</button>
           <button type="button" class="btn btn-primary" id="novoCasoSalvar">Criar caso</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="ligacaoOverlay">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h2 id="ligacaoTitulo">Agendar ligação</h2>
+          <button type="button" class="modal-close" id="ligacaoClose">✕</button>
+        </div>
+        <div class="modal-body">
+          <p id="ligacaoCliente" style="margin:0 0 14px; font-size:0.86rem; color:var(--text-secondary);"></p>
+          <label class="field-label" for="ligacaoDataHora">Data e hora da ligação *</label>
+          <input type="datetime-local" id="ligacaoDataHora" class="field-input" />
+          <p id="ligacaoAviso" style="display:none; margin:12px 0 0; font-size:0.8rem; color:var(--text-secondary);">
+            O cliente será avisado pelo WhatsApp de que o horário foi alterado.
+          </p>
+          <p id="ligacaoErro" class="modal-error" style="display:none;"></p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" id="ligacaoCancelar">Fechar</button>
+          <button type="button" class="btn btn-primary" id="ligacaoSalvar">Agendar</button>
         </div>
       </div>
     </div>

@@ -87,3 +87,20 @@ CREATE TABLE IF NOT EXISTS clients (
 
 CREATE INDEX IF NOT EXISTS idx_clients_name ON clients(name);
 CREATE INDEX IF NOT EXISTS idx_clients_email ON clients(email);
+
+-- ============================================================
+-- Ligação com o advogado (agendada pelo painel do CRM — ver callService.js)
+--   call_status: NULL (sem ligação) | 'pendente' | 'concluida'
+--   call_reminders_sent: quantos avisos de "ligação atrasada" já saíram
+--   (a cada 30 min, por até 3 h depois do horário marcado)
+-- Rode no SQL Editor do Supabase (ou "npm run db:migrate") se crm_cases já existia.
+-- ============================================================
+ALTER TABLE crm_cases ADD COLUMN IF NOT EXISTS call_status TEXT
+  CHECK (call_status IS NULL OR call_status IN ('pendente', 'concluida'));
+ALTER TABLE crm_cases ADD COLUMN IF NOT EXISTS call_scheduled_at TIMESTAMPTZ;
+ALTER TABLE crm_cases ADD COLUMN IF NOT EXISTS call_completed_at TIMESTAMPTZ;
+ALTER TABLE crm_cases ADD COLUMN IF NOT EXISTS call_reminders_sent INTEGER NOT NULL DEFAULT 0;
+
+CREATE INDEX IF NOT EXISTS idx_crm_cases_call_pending
+  ON crm_cases(call_scheduled_at)
+  WHERE call_status = 'pendente';

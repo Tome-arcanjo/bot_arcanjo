@@ -13,6 +13,7 @@ import authRoutes from "./routes/auth.js";
 import { requireAuth } from "./middleware/auth.js";
 import { initDatabase } from "./database/db.js";
 import { loadSettingsFromDb } from "./services/settingsService.js";
+import { startCallReminderScheduler } from "./services/callService.js";
 import {
   dashboardRoot,
   configuracoesView,
@@ -132,6 +133,9 @@ async function start() {
     console.log(`  Admin    : http://localhost:${PORT}/admin`);
     console.log(`  Webhook  : http://localhost:${PORT}/webhook/whatsapp`);
     console.log("=".repeat(50));
+
+    // Avisos de "ligação atrasada" (ver services/callService.js).
+    startCallReminderScheduler();
   });
 }
 

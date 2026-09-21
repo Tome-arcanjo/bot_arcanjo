@@ -33,7 +33,8 @@ bot_arcanjo/
 │   │   ├── chatService.js           # Lógica de negócio (sessões, mensagens, IA)
 │   │   ├── whatsappService.js       # Envio de mensagens WhatsApp
 │   │   ├── clientsService.js        # CRUD da tabela de contatos (clients)
-│   │   └── crmClassifierService.js  # Classificação de casos + extração de contato via IA
+│   │   ├── crmClassifierService.js  # Classificação de casos + extração de contato via IA
+│   │   └── callService.js           # Ligação com o advogado (agendar/remarcar/cancelar + avisos de atraso)
 │   ├── providers/
 │   │   ├── anthropic.js             # Wrapper Anthropic/Claude
 │   │   └── openai.js                # Wrapper OpenAI

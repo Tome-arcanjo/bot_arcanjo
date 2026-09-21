@@ -1,5 +1,6 @@
 ﻿import { Router } from "express";
 import { getCases, createCase, updateCaseStatus, updateCaseTags, deleteCase } from "../services/crmService.js";
+import { scheduleCall, completeCall, cancelCall } from "../services/callService.js";
 
 const router = Router();
 
@@ -66,6 +67,45 @@ router.patch("/cases/:id/tags", async (req, res) => {
     res.json({ success: true, data: updated });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ── Ligação com o advogado ──────────────────────────────────────────────
+
+// Erros de regra de negócio (CallError) trazem o status HTTP; o resto é 500.
+function sendCallError(res, error) {
+  const status = error.status || 500;
+  res.status(status).json({ success: false, error: error.message });
+}
+
+// Agenda a ligação — ou remarca, se já houver uma pendente (o cliente é avisado).
+router.put("/cases/:id/call", async (req, res) => {
+  const { scheduledAt } = req.body || {};
+  try {
+    const { case: updated, isReschedule, clientNotified } = await scheduleCall(req.params.id, scheduledAt);
+    res.json({ success: true, data: updated, rescheduled: isReschedule, clientNotified });
+  } catch (error) {
+    sendCallError(res, error);
+  }
+});
+
+// Marca a ligação como concluída.
+router.post("/cases/:id/call/complete", async (req, res) => {
+  try {
+    const { case: updated } = await completeCall(req.params.id);
+    res.json({ success: true, data: updated });
+  } catch (error) {
+    sendCallError(res, error);
+  }
+});
+
+// Cancela a ligação (o cliente é avisado).
+router.delete("/cases/:id/call", async (req, res) => {
+  try {
+    const { case: updated, clientNotified } = await cancelCall(req.params.id);
+    res.json({ success: true, data: updated, clientNotified });
+  } catch (error) {
+    sendCallError(res, error);
   }
 });
 
