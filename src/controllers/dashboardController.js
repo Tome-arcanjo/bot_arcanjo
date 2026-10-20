@@ -198,7 +198,7 @@ export function conversasView(req, res) {
 // ── Contatos (cadastro de clientes) ────────────────────────────────────
 export function contatosView(req, res) {
   const content = `
-    <div class="dash-card" style="margin-bottom:16px; padding:14px 18px;">
+    <div style="margin-bottom:16px; max-width:420px;">
       <input type="search" id="contatosSearch" class="field-input" placeholder="Buscar por nome, telefone ou e-mail..." />
     </div>
     <div class="dash-card dash-table-wrapper">

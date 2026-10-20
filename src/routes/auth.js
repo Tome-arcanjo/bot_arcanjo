@@ -67,31 +67,31 @@ function buildLoginHTML(error) {
   <style>
     body {
       min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px;
-      background: var(--brand-black);
-      background-image: radial-gradient(circle at 15% 15%, rgba(211,161,74,0.08), transparent 45%);
+      background: var(--bg-app);
     }
     .login-card {
-      background: var(--brand-dark); border: 1px solid rgba(255,255,255,0.08); border-radius: var(--radius-lg);
-      padding: 44px 40px; width: 100%; max-width: 400px; box-shadow: var(--shadow-md);
+      background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg);
+      padding: 32px; width: 100%; max-width: 380px; box-shadow: var(--shadow-md);
     }
-    .login-logo { display: block; height: 30px; width: auto; margin-bottom: 30px; }
-    .subtitle { color: var(--text-on-dark-muted); font-size: 0.88rem; margin-bottom: 30px; }
-    label { display: block; font-size: 0.82rem; color: var(--text-on-dark-muted); margin-bottom: 6px; font-weight: 500; }
+    .login-logo { display: block; height: 26px; width: auto; margin-bottom: 24px; }
+    .subtitle { color: var(--text-secondary); font-size: 0.86rem; margin-bottom: 24px; }
+    label { display: block; font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 6px; font-weight: 500; }
     input {
-      width: 100%; padding: 12px 14px; margin-bottom: 20px; background: rgba(255,255,255,0.04);
-      border: 1px solid rgba(255,255,255,0.12); border-radius: var(--radius-sm); color: var(--text-on-dark);
-      font-size: 0.92rem; font-family: inherit;
+      width: 100%; height: 38px; padding: 0 12px; margin-bottom: 16px; background: var(--bg-app);
+      border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-primary);
+      font-size: 0.88rem; font-family: inherit; transition: border-color 0.12s, box-shadow 0.12s;
     }
-    input:focus { outline: none; border-color: var(--brand-gold); }
+    input:hover { border-color: var(--border-strong); }
+    input:focus { outline: none; border-color: var(--brand-gold); box-shadow: 0 0 0 3px var(--brand-gold-soft); }
     button {
-      width: 100%; padding: 13px; background: var(--brand-gold); color: #1a1206; border: none;
-      border-radius: var(--radius-sm); font-size: 0.92rem; font-weight: 700; cursor: pointer;
-      font-family: inherit; transition: filter 0.15s;
+      width: 100%; height: 38px; margin-top: 4px; background: var(--brand-gold); color: #17110a; border: none;
+      border-radius: var(--radius-sm); font-size: 0.86rem; font-weight: 600; cursor: pointer;
+      font-family: inherit; transition: filter 0.12s;
     }
-    button:hover { filter: brightness(0.94); }
+    button:hover { filter: brightness(1.08); }
     .error-msg {
-      background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.35); color: #f87171;
-      padding: 10px 14px; border-radius: var(--radius-sm); font-size: 0.84rem; margin-bottom: 20px;
+      background: rgba(242,85,90,0.08); border: 1px solid rgba(242,85,90,0.3); color: #f77c80;
+      padding: 9px 12px; border-radius: var(--radius-sm); font-size: 0.82rem; margin-bottom: 16px;
     }
   </style>
 </head>

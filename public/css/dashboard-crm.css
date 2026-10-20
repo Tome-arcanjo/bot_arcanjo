@@ -1,6 +1,7 @@
+/* ── Kanban ── */
 .crm-board {
   display: flex;
-  gap: 16px;
+  gap: 12px;
   overflow-x: auto;
   padding-bottom: 12px;
   align-items: flex-start;
@@ -8,55 +9,67 @@
 
 .crm-column {
   background: var(--bg-card-raised);
-  min-width: 280px;
-  max-width: 280px;
-  border-radius: var(--radius-md);
-  padding: 12px;
+  border: 1px solid var(--border-soft);
+  min-width: 288px;
+  max-width: 288px;
+  border-radius: var(--radius-lg);
+  padding: 10px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  transition: background 0.15s;
+  gap: 8px;
+  transition: background 0.12s, border-color 0.12s;
 }
 
 .crm-column.drag-over {
-  background: var(--brand-gold-soft-strong);
-  outline: 2px dashed var(--brand-gold);
-  outline-offset: -2px;
+  background: var(--brand-gold-soft);
+  border-color: rgba(211, 161, 74, 0.45);
 }
 
 .crm-column-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 2px 4px 6px;
+  padding: 4px 6px 6px;
 }
 
 .crm-column-header h3 {
   margin: 0;
-  font-size: 0.82rem;
-  font-weight: 700;
-  color: var(--text-primary);
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-secondary);
 }
 
 .crm-column-count {
-  font-size: 0.72rem;
-  color: var(--text-secondary);
-  background: rgba(255, 255, 255, 0.07);
-  padding: 1px 8px;
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.05);
+  padding: 0 7px;
+  line-height: 1.6;
   border-radius: 100px;
 }
 
+/* ── Card ── */
 .crm-card {
   position: relative;
   background: var(--bg-card);
-  padding: 14px 16px;
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border);
+  padding: 12px;
+  border-radius: var(--radius-md);
   cursor: grab;
-  border-left: 3px solid var(--brand-gold);
-  transition: box-shadow 0.15s, transform 0.15s;
+  transition: border-color 0.12s, background 0.12s;
 }
 
+.crm-card:hover {
+  border-color: var(--border-strong);
+  background: #1e1e1e;
+}
+
+.crm-card:active { cursor: grabbing; }
+
+.crm-card.dragging { opacity: 0.4; }
+
+/* O "x" de excluir só aparece com o mouse sobre o card, para não poluir. */
 .crm-card-delete {
   position: absolute;
   top: 8px;
@@ -67,40 +80,36 @@
   align-items: center;
   justify-content: center;
   border: none;
-  border-radius: 100px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   line-height: 1;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  opacity: 0;
+  transition: opacity 0.12s, background 0.12s, color 0.12s;
 }
+
+.crm-card:hover .crm-card-delete,
+.crm-card-delete:focus-visible { opacity: 1; }
 
 .crm-card-delete:hover {
-  background: rgba(239, 68, 68, 0.15);
-  color: #f87171;
-}
-
-.crm-card:active { cursor: grabbing; }
-
-.crm-card.dragging {
-  opacity: 0.4;
-}
-
-.crm-card:hover {
-  box-shadow: var(--shadow-md);
+  background: rgba(242, 85, 90, 0.12);
+  color: var(--danger);
 }
 
 .crm-card-title {
-  font-weight: 700;
-  font-size: 0.86rem;
-  margin-bottom: 4px;
-  padding-right: 22px;
+  font-weight: 600;
+  font-size: 0.85rem;
+  line-height: 1.3;
+  margin-bottom: 2px;
+  padding-right: 24px;
 }
 
 .crm-card-phone {
-  font-size: 0.76rem;
-  color: var(--text-secondary);
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
   margin-bottom: 8px;
 }
 
@@ -108,21 +117,26 @@
   font-size: 0.78rem;
   color: var(--text-secondary);
   margin-bottom: 10px;
-  line-height: 1.4;
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .crm-card-tags {
   display: flex;
-  gap: 6px;
+  gap: 4px;
   flex-wrap: wrap;
 }
 
-/* ── Modal "Novo caso" ── */
+/* ── Modais ── */
 .modal-overlay {
   display: none;
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(0, 0, 0, 0.62);
+  backdrop-filter: blur(2px);
   align-items: center;
   justify-content: center;
   z-index: 100;
@@ -146,55 +160,57 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 20px 24px;
-  border-bottom: 1px solid var(--border-soft);
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
 }
 
 .modal-header h2 {
   margin: 0;
-  font-size: 1rem;
-  font-weight: 700;
+  font-size: 0.95rem;
+  font-weight: 600;
 }
 
 .modal-close {
+  width: 26px;
+  height: 26px;
   border: none;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-secondary);
-  font-size: 0.9rem;
+  font-size: 0.8rem;
   cursor: pointer;
-  padding: 4px;
 }
 
-.modal-close:hover { color: var(--text-primary); }
+.modal-close:hover { color: var(--text-primary); background: var(--bg-hover); }
 
 .modal-body {
-  padding: 20px 24px;
+  padding: 18px 20px;
 }
 
 .modal-error {
-  color: #f87171;
-  font-size: 0.82rem;
+  color: var(--danger);
+  font-size: 0.8rem;
   margin: 12px 0 0;
 }
 
 .modal-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 10px;
-  padding: 16px 24px;
-  border-top: 1px solid var(--border-soft);
+  gap: 8px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--border);
 }
 
 /* ── Ligação com o advogado ── */
 .crm-call-alert {
   margin-bottom: 14px;
-  padding: 10px 16px;
-  border-radius: var(--radius-sm);
-  background: rgba(239, 68, 68, 0.14);
-  border: 1px solid rgba(239, 68, 68, 0.4);
-  color: #f87171;
-  font-size: 0.84rem;
-  font-weight: 600;
+  padding: 9px 14px;
+  border-radius: var(--radius-md);
+  background: rgba(242, 85, 90, 0.08);
+  border: 1px solid rgba(242, 85, 90, 0.28);
+  color: #f77c80;
+  font-size: 0.82rem;
+  font-weight: 500;
 }
 
 .crm-card-call {
@@ -208,41 +224,42 @@
 }
 
 .crm-call-time {
-  font-size: 0.74rem;
-  color: var(--text-secondary);
+  font-size: 0.72rem;
+  color: var(--text-muted);
 }
 
 .crm-call-late {
-  color: #f87171;
-  font-weight: 600;
+  color: #f77c80;
+  font-weight: 500;
 }
 
 .crm-card-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 10px;
+  gap: 4px;
+  margin-top: 8px;
 }
 
+/* Botões de ação da ligação: discretos, sem contorno; só ganham fundo no hover. */
 .crm-call-btn {
-  border: 1px solid var(--border);
-  background: transparent;
+  border: none;
+  background: rgba(255, 255, 255, 0.05);
   color: var(--text-secondary);
+  font-family: inherit;
   font-size: 0.72rem;
-  padding: 3px 9px;
-  border-radius: 100px;
+  font-weight: 500;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: border-color 0.15s, color 0.15s, background 0.15s;
+  transition: background 0.12s, color 0.12s;
 }
 
 .crm-call-btn:hover {
-  border-color: var(--brand-gold);
+  background: rgba(255, 255, 255, 0.1);
   color: var(--text-primary);
 }
 
 .crm-call-btn-danger:hover {
-  border-color: #f87171;
-  color: #f87171;
-  background: rgba(239, 68, 68, 0.1);
+  background: rgba(242, 85, 90, 0.14);
+  color: var(--danger);
 }
-
