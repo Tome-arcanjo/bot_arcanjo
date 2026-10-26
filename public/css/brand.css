@@ -60,6 +60,10 @@
 
 * , *::before, *::after { box-sizing: border-box; }
 
+/* O atributo hidden precisa vencer classes que definem display (.btn,
+   .thread-header...): sem isso, um botão "escondido" continua aparecendo. */
+[hidden] { display: none !important; }
+
 body.dashboard-body {
   margin: 0;
   font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;

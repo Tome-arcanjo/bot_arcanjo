@@ -22,8 +22,10 @@ bot_arcanjo/
 │   │   ├── whatsappController.js  # Webhook do WhatsApp (verificação + mensagens)
 │   │   └── dashboardController.js # Páginas do painel (Configurações, CRM, Conversas, Contatos, Canais)
 │   ├── services/
-│   │   ├── chatService.js         # Lógica de negócio: sessões, mensagens, chamada de IA
-│   │   ├── whatsappService.js     # Envio de mensagens de volta ao WhatsApp
+│   │   ├── chatService.js         # Sessões, mensagens recebidas, geração da resposta da IA (toAiHistory)
+│   │   ├── whatsappService.js     # Cloud API: texto, modelo (template), flags de envio/simulação, erros da Meta
+│   │   ├── outboundService.js     # Caminho único de saída: grava, envia, status de entrega, janela de 24 h
+│   │   ├── handoverService.js     # Atendimento humano: assumir/devolver à IA, responder, presença
 │   │   ├── clientsService.js      # CRUD da tabela de contatos (clients)
 │   │   ├── crmService.js          # Escritas em crm_cases: grava histórico + emite crmChanged (rotas, IA e ligações)
 │   │   ├── caseEventsService.js   # Histórico dos casos (case_events)
@@ -93,6 +95,9 @@ bot_arcanjo/
 | `SESSION_SECRET` | Assina o cookie de login. OBRIGATÓRIO em produção (o servidor não sobe sem ele) | `openssl rand -hex 32` |
 | `COOKIE_SECURE` | `auto` (padrão: Secure só se o proxy informar HTTPS), `true` ou `false` | `auto` |
 | `TRUST_PROXY` | Saltos de proxy confiáveis para `X-Forwarded-*` (padrão `1` = Nginx) | `1` |
+| `WHATSAPP_SEND_ENABLED` | `true` = envia de verdade pela Cloud API. Padrão `false`: nada sai, e as mensagens ficam "Não enviada" no painel | `false` |
+| `WHATSAPP_SIMULATE` | Com o envio desligado, `true` finge que enviou ("Enviada (simulado)") | `false` |
+| `WHATSAPP_TEMPLATE_REENGAGE` / `WHATSAPP_TEMPLATE_LANG` | Modelo aprovado para retomar conversa fora da janela de 24 h | `retomada_atendimento` / `pt_BR` |
 | `CALL_ALERT_PHONES` | OPCIONAL: números (DDI, só dígitos, vírgula) que também recebem o aviso de "ligação atrasada" no WhatsApp. Vazio = só aviso no navegador | `5511999999999,5511888888888` |
 | `APP_TIMEZONE` | Fuso dos horários nas mensagens de ligação (padrão `America/Sao_Paulo`) | `America/Sao_Paulo` |
 
@@ -155,6 +160,13 @@ bot_arcanjo/
   - `DELETE /api/crm/cases/:id/call` — cancela a ligação e o bot avisa o cliente
 - `/api/contatos` — Lista/busca de clientes
 - `/api/conversas` — Sessões e mensagens (usado pela aba Conversas)
+  - `GET /api/conversas/stream` — SSE: mensagem nova (sem nome de evento), `status` (entrega), `session` (IA pausada/retomada, quem atende), `presence`
+  - `GET /api/conversas/:id/state` — `{ session, window, viewers, sending: "on" | "simulated" | "off" }`
+  - `POST /api/conversas/:id/messages` `{ content, force? }` — funcionário responde (pausa a IA; 409 `HANDLED_BY_OTHER` / `WINDOW_CLOSED`)
+  - `POST /api/conversas/:id/assume` `{ force? }`, `POST /api/conversas/:id/release` — assumir / devolver à IA
+  - `POST /api/conversas/:id/template` — envia o modelo de retomada (fora das 24 h)
+  - `POST /api/conversas/messages/:messageId/retry` — reenvia uma mensagem `failed`
+  - `POST /api/conversas/:id/presence` `{ leave? }` — presença na conversa
 
 ---
 
@@ -178,14 +190,14 @@ Schema definido em `init.sql`. Duas tabelas principais:
 |---|---|---|
 | `id` | TEXT PK | UUID da mensagem |
 | `session_id` | TEXT FK | Referência à sessão (CASCADE delete) |
-| `role` | TEXT | `user`, `assistant` ou `system` |
+| `role` | TEXT | `user`, `assistant`, `system` ou `human` (funcionário) |
 | `content` | TEXT | Conteúdo da mensagem |
 | `created_at` | TIMESTAMPTZ | — |
 
 ### Ligação com o advogado (`crm_cases.call_*`)
 O admin agenda a ligação pelo card do caso no CRM (a IA nunca agenda). Colunas: `call_status` (`NULL` | `pendente` | `concluida` — etiquetas "Ligação Pendente" / "Ligação Concluída"), `call_scheduled_at`, `call_completed_at`, `call_reminders_sent`.
 
-- **Remarcar/cancelar**: o bot envia uma mensagem ao cliente pelo WhatsApp e a registra na conversa.
+- **Remarcar/cancelar**: o bot envia uma mensagem ao cliente pelo WhatsApp (via `outboundService`), registrada na conversa com o status da entrega, inclusive quando não pôde ser enviada.
 - **Atraso (aviso principal, no navegador)**: `public/js/dashboard-call-alerts.js` é carregado em todas as telas do painel (via `dashboardLayout.js`), consulta `/api/crm/calls/overdue` a cada 30 s e dispara notificação do sistema + som + faixa na tela quando a ligação passa do horário, repetindo a cada 30 min por 3 h (7 avisos). O último aviso dado fica no `localStorage`, então recarregar/navegar não repete. Para não virar spam (e não ser bloqueado por extensões como o Malwarebytes Browser Guard): várias ligações viram UMA notificação-resumo, com `tag` fixa (a nova substitui a anterior), sem `requireInteraction`, com 60 s de intervalo mínimo entre notificações, no máximo 3 faixas na tela e nunca duas consultas simultâneas. O admin precisa clicar em "🔔 Ativar alertas" uma vez para liberar as notificações, e alguma aba do painel precisa estar aberta. No CRM o card também fica vermelho ("atrasada") e há um banner no topo.
 - **Atraso (opcional, WhatsApp)**: se `CALL_ALERT_PHONES` estiver preenchido, `callService.startCallReminderScheduler()` (boot, a cada 1 min) também manda o mesmo cronograma de avisos por WhatsApp. Concluir, cancelar ou remarcar encerra/zera os avisos.
 - Limitação da Meta: texto livre só é entregue a quem falou com o bot nas últimas 24 h; fora disso o envio falha (vale para o aviso ao cliente e para `CALL_ALERT_PHONES`; o painel avisa o admin quando o cliente não pôde ser notificado).
@@ -212,20 +224,31 @@ O admin agenda a ligação pelo card do caso no CRM (a IA nunca agenda). Colunas
 ```
 Cliente (WhatsApp)
   ↓
-whatsappController.js
+whatsappController.js  (também processa value.statuses → outboundService.applyDeliveryStatus)
   ↓
-chatService.processMessage()
+chatService.saveIncomingMessage()   — SEMPRE: salva, emite no SSE e dispara o
+  ↓                                    crmClassifierService (fire-and-forget)
+sessions.ai_paused? ── sim → para aqui (atendimento humano; a IA não responde)
+  ↓ não
+chatService.generateAiReply() → callAIProvider() → anthropic.js | openai.js
   ↓
-callAIProvider() → anthropic.js | openai.js
-  ↓
-crmClassifierService (fire-and-forget: classifica caso + extrai contato)
-  ↓
-Salva resposta no Supabase
-  ↓
-Retorna resposta ao cliente
+relê a sessão: alguém assumiu enquanto a IA pensava? ── sim → descarta a resposta
+  ↓ não
+outboundService.deliverMessage()  — grava "pending" → whatsappService → "sent"/"failed"
 ```
 
-Após receber a resposta, `whatsappService.js` envia a mensagem de volta via API da Meta. O painel (`/dashboard/*`) lê os mesmos dados (`sessions`, `messages`, `crm_cases`, `clients`) via as APIs REST listadas acima — não há mais interface de chat web de teste (removida junto com o restante da primeira versão do projeto).
+O painel (`/dashboard/*`) lê os mesmos dados (`sessions`, `messages`, `crm_cases`, `clients`) via as APIs REST listadas acima — não há mais interface de chat web de teste (removida junto com o restante da primeira versão do projeto).
+
+### Atendimento humano nas conversas
+- **Toda mensagem que sai** (IA, funcionário, modelo, avisos de ligação) passa por `outboundService.deliverMessage`. A mensagem é gravada antes (`pending`) e atualizada para `sent`/`failed` + `delivery_error`, e os status que a Meta manda depois (`delivered`, `read`, `failed`) chegam pelo webhook. Nunca chame `sendWhatsAppMessage` direto para falar com um cliente, senão a mensagem não aparece no painel. Exceção: os avisos de atraso para `CALL_ALERT_PHONES`, que não são conversas.
+- `whatsappService` **nunca lança erro**: devolve `{ ok, waMessageId, error, simulated }`. Erros da Meta são traduzidos (`describeMetaError`).
+- **Flags**: `WHATSAPP_SEND_ENABLED=true` envia de verdade. Desligado, `WHATSAPP_SIMULATE=true` finge o envio (`wa_message_id` começa com `sim-`, e o painel mostra "Enviada (simulado)"). Desligado sem simulação, toda mensagem fica `failed` com o motivo. `markMessageAsRead` só roda com o envio ligado. `WHATSAPP_GRAPH_URL` existe só para os testes (Graph falsa).
+- **Janela de 24 h**: `getWindowState(sessionId)` usa a última mensagem `user`. Fora da janela: a resposta humana é recusada com 409 `WINDOW_CLOSED` (nada é gravado) e o painel oferece o modelo `WHATSAPP_TEMPLATE_REENGAGE`. Avisos automáticos (ligação) ficam gravados como `failed` com o motivo, sem chamar a Meta.
+- **Assumir / Devolver** (`handoverService.js`): assumir pausa a IA e define `handler_user_id`. Responder pelo painel assume automaticamente. Se outra pessoa está atendendo, a API responde 409 `HANDLED_BY_OTHER` com `handler.name`, e o painel confirma antes de reenviar com `force: true`. Os eventos `ai_paused`/`ai_resumed` vão para `case_events` (com o `case_id` do caso do telefone, se houver) e para o SSE (`session`).
+- **Presença**: `POST /api/conversas/:id/presence` a cada 20 s (em memória, expira em 45 s) mostra "Fulana também está com esta conversa aberta".
+- **Histórico para a IA** (`chatService.toAiHistory`): `human` vira `assistant`, mensagens `failed` ficam de fora, turnos seguidos do mesmo papel são unidos e o histórico começa sempre pelo cliente.
+- Mídia não suportada (imagem, áudio etc.) fica registrada na conversa como `[O cliente enviou ...]` (sem classificar) e, com a IA ativa, o bot pede o conteúdo como texto.
+- `?phone=` (link do CRM → Conversas) continua comparando só os dígitos.
 
 ---
 

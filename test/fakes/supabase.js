@@ -16,16 +16,44 @@ import fs from "fs";
 const PRIMARY_KEYS = { clients: "phone", web_sessions: "sid", bot_settings: "id" };
 const UNIQUE_COLUMNS = { users: ["email"] };
 
-function load() {
-  try {
-    return JSON.parse(fs.readFileSync(process.env.FAKE_DB_FILE, "utf8"));
-  } catch {
-    return {};
+// O processo de teste lê este arquivo enquanto o servidor grava: a gravação
+// é atômica (temporário + rename) e leitura/rename tentam de novo se o
+// Windows estiver com o arquivo aberto do outro lado.
+const RETRYABLE = new Set(["EPERM", "EBUSY", "EACCES"]);
+
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+export function readJsonWithRetry(file) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return JSON.parse(fs.readFileSync(file, "utf8"));
+    } catch (error) {
+      if (error.code === "ENOENT") return {};
+      if (attempt >= 100) throw error;
+      sleepSync(5);
+    }
   }
 }
 
+function load() {
+  return readJsonWithRetry(process.env.FAKE_DB_FILE);
+}
+
 function save(db) {
-  fs.writeFileSync(process.env.FAKE_DB_FILE, JSON.stringify(db, null, 2));
+  const file = process.env.FAKE_DB_FILE;
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(db));
+  for (let attempt = 0; ; attempt++) {
+    try {
+      fs.renameSync(tmp, file);
+      return;
+    } catch (error) {
+      if (attempt >= 100 || !RETRYABLE.has(error.code)) throw error;
+      sleepSync(5);
+    }
+  }
 }
 
 function pkOf(table) {

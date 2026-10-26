@@ -1,7 +1,13 @@
 import "dotenv/config";
 import crypto from "crypto";
-import { getOrCreateSessionByPhone, processMessage } from "../services/chatService.js";
-import { sendWhatsAppMessage, markMessageAsRead } from "../services/whatsappService.js";
+import {
+  getOrCreateSessionByPhone,
+  getSessionById,
+  saveIncomingMessage,
+  generateAiReply,
+} from "../services/chatService.js";
+import { markMessageAsRead, describeMetaError } from "../services/whatsappService.js";
+import { deliverMessage, applyDeliveryStatus } from "../services/outboundService.js";
 
 const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN;
 const APP_SECRET = process.env.WHATSAPP_APP_SECRET;
@@ -78,10 +84,17 @@ export async function receiveMessage(req, res) {
     for (const entry of body.entry || []) {
       for (const change of entry.changes || []) {
         const value = change.value;
-        if (!value || !value.messages || value.messages.length === 0) continue;
+        if (!value) continue;
+
+        // Avisos de entrega das mensagens que NÓS enviamos (sent/delivered/
+        // read/failed). A falha da janela de 24 h só chega por aqui.
+        for (const status of value.statuses || []) {
+          const error = status.errors?.[0] ? describeMetaError(status.errors[0]) : null;
+          await applyDeliveryStatus(status.id, status.status, error);
+        }
 
         // Um único payload pode conter mais de uma mensagem — processa todas.
-        for (const message of value.messages) {
+        for (const message of value.messages || []) {
           await handleIncomingMessage(message, value);
         }
       }
@@ -112,41 +125,53 @@ async function handleIncomingMessage(message, value) {
     textContent = message.button?.text || null;
   }
 
-  if (!textContent) {
-    const label = UNSUPPORTED_TYPE_LABEL[message.type] || UNSUPPORTED_TYPE_LABEL.unknown;
-    console.log(`[WhatsApp] Recebido de ${fromPhone}: mensagem do tipo "${message.type}" (não suportada)`);
-    await safeSend(fromPhone, `No momento eu ainda não consigo processar ${label} 🙏 — pode me enviar como texto?`);
-    return;
-  }
-
-  console.log(`[WhatsApp] Recebido de ${fromPhone} (${senderName}): ${textContent}`);
-
   try {
     // 1. Obtém ou cria a sessão vinculada ao telefone
     const session = await getOrCreateSessionByPhone(fromPhone);
 
-    // 2. Processa a mensagem usando o ChatService (IA + histórico)
-    //    Usa o provider padrão da sessão
-    const aiResponse = await processMessage(session.id, textContent, session.provider);
+    // 2. Salva a mensagem do cliente (sempre — com IA ativa ou pausada) e
+    //    dispara a classificação do CRM. Tipos não suportados ficam
+    //    registrados como aviso, para a equipe ver que o cliente mandou algo.
+    let autoReply;
+    if (textContent) {
+      console.log(`[WhatsApp] Recebido de ${fromPhone} (${senderName}): ${textContent}`);
+      await saveIncomingMessage(session, textContent);
+    } else {
+      const label = UNSUPPORTED_TYPE_LABEL[message.type] || UNSUPPORTED_TYPE_LABEL.unknown;
+      console.log(`[WhatsApp] Recebido de ${fromPhone}: mensagem do tipo "${message.type}" (não suportada)`);
+      await saveIncomingMessage(session, `[O cliente enviou ${label} — tipo ainda não suportado pelo bot]`, { classify: false });
+      autoReply = `No momento eu ainda não consigo processar ${label} 🙏 — pode me enviar como texto?`;
+    }
 
-    // 3. Envia a resposta de volta ao WhatsApp
-    await sendWhatsAppMessage(fromPhone, aiResponse.content);
-    console.log(`[WhatsApp] Respondido para ${fromPhone}`);
+    // 3. Atendimento humano: a IA não responde essa conversa.
+    if (session.ai_paused) {
+      console.log(`[WhatsApp] IA pausada para ${fromPhone} (atendimento humano) — mensagem salva, sem resposta automática.`);
+      return;
+    }
+
+    // 4. Gera a resposta da IA (sem enviar ainda)
+    if (!autoReply) {
+      try {
+        autoReply = await generateAiReply(session);
+      } catch (error) {
+        // Sem isso, um erro na IA deixava o usuário sem resposta e sem
+        // nenhum feedback — o request nem sabe que algo deu errado.
+        console.error(`[WhatsApp] Erro da IA ao responder ${fromPhone}:`, error.message);
+        autoReply = "Desculpa, tive um problema para processar sua mensagem agora 😕 Pode tentar de novo em instantes?";
+      }
+    }
+
+    // 5. Alguém pode ter assumido a conversa enquanto a IA pensava.
+    const current = (await getSessionById(session.id)) || session;
+    if (current.ai_paused) {
+      console.log(`[WhatsApp] ${fromPhone} foi assumido por um atendente enquanto a IA respondia — resposta da IA descartada.`);
+      return;
+    }
+
+    // 6. Envia (a mensagem fica gravada com o status da entrega)
+    const { ok } = await deliverMessage({ session: current, content: autoReply, role: "assistant" });
+    if (ok) console.log(`[WhatsApp] Respondido para ${fromPhone}`);
   } catch (error) {
-    // Sem isso, um erro na IA ou no banco deixava o usuário sem resposta e
-    // sem nenhum feedback — o request nem sabe que algo deu errado.
     console.error(`[WhatsApp] Erro ao processar mensagem de ${fromPhone}:`, error.message);
-    await safeSend(
-      fromPhone,
-      "Desculpa, tive um problema para processar sua mensagem agora 😕 Pode tentar de novo em instantes?"
-    );
-  }
-}
-
-async function safeSend(to, text) {
-  try {
-    await sendWhatsAppMessage(to, text);
-  } catch (error) {
-    console.error(`[WhatsApp] Falha ao enviar mensagem de fallback para ${to}:`, error.message);
   }
 }

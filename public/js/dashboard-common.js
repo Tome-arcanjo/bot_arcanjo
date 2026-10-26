@@ -67,7 +67,8 @@
       // resposta sem corpo JSON
     }
     if (!res.ok || json.success === false) {
-      throw new Error(json.error || `Erro ${res.status}`);
+      // status/code/body ajudam a tela a tratar casos como HANDLED_BY_OTHER.
+      throw Object.assign(new Error(json.error || `Erro ${res.status}`), { status: res.status, code: json.code, body: json });
     }
     return json;
   }

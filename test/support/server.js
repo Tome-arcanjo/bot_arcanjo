@@ -9,6 +9,7 @@ import net from "net";
 import os from "os";
 import path from "path";
 import { fileURLToPath, pathToFileURL } from "url";
+import { readJsonWithRetry } from "../fakes/supabase.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const SERVER_PATH = path.join(ROOT, "src/server.js");
@@ -38,6 +39,7 @@ function baseEnv() {
 export async function spawnServer({ env = {}, db = {} } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "arcanjo-test-"));
   const dbFile = path.join(dir, "db.json");
+  const aiLog = path.join(dir, "ai.log");
   fs.writeFileSync(dbFile, JSON.stringify(db));
   const port = await freePort();
 
@@ -48,6 +50,7 @@ export async function spawnServer({ env = {}, db = {} } = {}) {
       SUPABASE_URL: "http://fake.supabase.local",
       SUPABASE_KEY: "fake-key",
       FAKE_DB_FILE: dbFile,
+      FAKE_AI_LOG: aiLog,
       PORT: String(port),
       ...env,
     },
@@ -64,7 +67,10 @@ export async function spawnServer({ env = {}, db = {} } = {}) {
     child,
     exited,
     logs: () => output,
-    readDb: () => JSON.parse(fs.readFileSync(dbFile, "utf8")),
+    readDb: () => readJsonWithRetry(dbFile),
+    /** Chamadas feitas à IA falsa (test/fakes/ai.js), em ordem. */
+    aiCalls: () =>
+      fs.existsSync(aiLog) ? fs.readFileSync(aiLog, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l)) : [],
     writeDb: (data) => fs.writeFileSync(dbFile, JSON.stringify(data)),
     async stop() {
       if (child.exitCode === null) {
@@ -94,6 +100,18 @@ export async function startServer(opts) {
   }
   await server.stop();
   throw new Error(`Servidor não respondeu a tempo:\n${server.logs()}`);
+}
+
+/** Espera `check()` devolver algo verdadeiro (o webhook processa depois de responder 200). */
+export async function until(check, { timeoutMs = 5000, what = "a condição" } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  let last;
+  while (Date.now() < deadline) {
+    last = await check();
+    if (last) return last;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw new Error(`Tempo esgotado esperando ${what}`);
 }
 
 /** Cliente HTTP com "pote" de cookies, sem seguir redirecionamentos. */

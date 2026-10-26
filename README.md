@@ -104,7 +104,7 @@ bot_arcanjo/
 | `/api/settings` | Personalidade do bot (salvar: somente admin) |
 | `/api/crm` | Casos do CRM: listar, mover, atribuir responsável, histórico e tempo real (`/api/crm/stream`) |
 | `/api/contatos` | Lista/busca de clientes |
-| `/api/conversas` | Sessões e mensagens |
+| `/api/conversas` | Sessões e mensagens; responder, assumir/devolver à IA, modelo de retomada, reenviar, presença e tempo real |
 
 ---
 
@@ -151,18 +151,16 @@ Cliente (WhatsApp)
     ↓
 whatsappController.js
     ↓
-chatService.processMessage()
+chatService.saveIncomingMessage()  → salva + classifica (crmClassifierService)
     ↓
-callAIProvider() → anthropic.js | openai.js
+IA pausada (um funcionário assumiu)? → sim: para aqui, a equipe responde pelo painel
+    ↓ não
+chatService.generateAiReply() → anthropic.js | openai.js
     ↓
-crmClassifierService (fire-and-forget: classifica caso + extrai contato)
-    ↓
-Salva resposta em Supabase
-    ↓
-Retorna resposta ao cliente
-    ↓
-whatsappService.js envia via Meta API
+outboundService.deliverMessage() → whatsappService (Meta) → status da entrega no painel
 ```
+
+**Atendimento humano:** na aba Conversas, qualquer funcionário pode **Assumir** a conversa (a IA para de responder aquele cliente) e responder pelo painel; **Devolver à IA** volta ao automático. Responder já assume a conversa. Se outra pessoa estiver atendendo, o painel pede confirmação, e mostra quem mais está com a conversa aberta. Toda mensagem enviada mostra se foi entregue; as que falharam aparecem em vermelho, com o motivo e o botão "Tentar de novo". Fora da janela de 24 h da Meta, só é possível enviar o modelo de retomada (`WHATSAPP_TEMPLATE_REENGAGE`).
 
 O painel (`/dashboard/*`) lê os mesmos dados (`sessions`, `messages`, `crm_cases`, `clients`) pelas APIs REST listadas acima. Não há mais interface de chat web de teste — ela foi removida junto com o restante da primeira versão do projeto.
 
@@ -292,6 +290,9 @@ location / {
 | `WHATSAPP_PHONE_NUMBER_ID` | (opcional) | — | ID número WhatsApp |
 | `WHATSAPP_VERIFY_TOKEN` | (opcional) | — | Token verificação webhook |
 | `WHATSAPP_APP_SECRET` | ✅ | — | Valida a assinatura do webhook; sem ele o webhook recusa tudo (503) |
+| `WHATSAPP_SEND_ENABLED` | ❌ | `false` | `true` envia de verdade. Desligado, as mensagens ficam salvas como "Não enviada" |
+| `WHATSAPP_SIMULATE` | ❌ | `false` | Com o envio desligado, finge que enviou (treino/testes) |
+| `WHATSAPP_TEMPLATE_REENGAGE` | ❌ | — | Modelo aprovado para retomar conversas após 24 h (`WHATSAPP_TEMPLATE_LANG`, padrão `pt_BR`) |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD_HASH` | ✅ | `admin` / — | Acesso de emergência ao painel (os funcionários entram com e-mail e senha próprios) |
 | `SESSION_SECRET` | ✅ em produção | — | Assina o cookie de login; o servidor não sobe em produção sem ele |
 | `COOKIE_SECURE` | ❌ | `auto` | `auto`, `true` ou `false` (ver seção Nginx) |

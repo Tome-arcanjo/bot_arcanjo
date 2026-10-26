@@ -29,15 +29,38 @@
 .conversa-item:hover { background: var(--bg-hover); }
 .conversa-item.active { background: var(--bg-active); }
 
+.conversa-item-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
 .conversa-item-title {
+  flex: 1;
+  min-width: 0;
   font-size: 0.84rem;
   font-weight: 500;
   color: var(--text-primary);
-  margin-bottom: 2px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* Quem responde a conversa: "IA" ou o avatar de quem assumiu */
+.conversa-item-ia {
+  flex-shrink: 0;
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 100px;
+  padding: 0 6px;
+  line-height: 1.6;
+}
+
+.conversa-item-handler { flex-shrink: 0; display: inline-flex; }
 
 .conversa-item-preview {
   font-size: 0.78rem;
@@ -49,11 +72,56 @@
 
 .conversa-item.active .conversa-item-preview { color: var(--text-secondary); }
 
+/* ── Conversa aberta: cabeçalho + mensagens + caixa de resposta ── */
+.conversas-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-app);
+}
+
+.thread-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.thread-who { flex: 1; min-width: 0; }
+
+.thread-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.thread-sub {
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.thread-link { color: var(--text-secondary); text-decoration: none; }
+.thread-link:hover { color: var(--text-primary); text-decoration: underline; }
+
+.thread-actions { display: flex; gap: 6px; }
+
+.thread-presence {
+  padding: 6px 24px;
+  font-size: 0.76rem;
+  color: #f7b068;
+  background: rgba(245, 158, 66, 0.06);
+  border-bottom: 1px solid rgba(245, 158, 66, 0.2);
+}
+
 .conversas-thread {
   flex: 1;
   overflow-y: auto;
   padding: 24px 32px;
-  background: var(--bg-app);
 }
 
 .thread-msg {
@@ -81,8 +149,97 @@
   margin-left: auto;
 }
 
+/* Mensagem escrita por um funcionário */
+.thread-msg.human {
+  background: #1f1f1f;
+  border: 1px solid var(--border-strong);
+  color: var(--text-primary);
+  margin-left: auto;
+}
+
+.thread-msg.is-failed { border-color: rgba(242, 85, 90, 0.45); }
+
+.thread-msg-author {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 2px;
+  white-space: normal;
+}
+
+.thread-msg.assistant .thread-msg-author { color: #e0b567; }
+
 .thread-msg-time {
   font-size: 0.68rem;
   color: var(--text-muted);
   margin-top: 4px;
+  white-space: normal;
 }
+
+.msg-status { margin-left: 4px; }
+.msg-status.is-pending { font-style: italic; }
+.msg-status.is-read { color: var(--info); }
+.msg-status.is-failed { color: #f77c80; }
+
+.msg-retry {
+  margin-left: 6px;
+  border: none;
+  background: rgba(242, 85, 90, 0.12);
+  color: #f77c80;
+  font-family: inherit;
+  font-size: 0.68rem;
+  font-weight: 500;
+  padding: 1px 7px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.msg-retry:hover { background: rgba(242, 85, 90, 0.2); }
+
+/* Aviso de "fora da janela de 24 h" */
+.thread-window {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 24px;
+  border-top: 1px solid rgba(245, 158, 66, 0.28);
+  background: rgba(245, 158, 66, 0.06);
+  color: #f7b068;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.thread-window > div:first-child { flex: 1; }
+.thread-window strong { color: #f7b068; }
+.thread-window-note { color: var(--text-muted); font-size: 0.74rem; flex-shrink: 0; max-width: 220px; }
+
+/* Caixa de resposta */
+.thread-composer {
+  padding: 12px 24px 14px;
+  border-top: 1px solid var(--border);
+}
+
+.thread-composer-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.thread-composer textarea {
+  flex: 1;
+  resize: none;
+  min-height: 38px;
+  max-height: 160px;
+}
+
+.thread-composer textarea:disabled { opacity: 0.5; cursor: not-allowed; }
+.thread-composer .btn { height: 38px; }
+
+.thread-composer-hint {
+  margin-top: 6px;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  min-height: 1em;
+}
+
+.thread-composer-hint.is-warning { color: #f7b068; }

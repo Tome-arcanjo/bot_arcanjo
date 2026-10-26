@@ -209,8 +209,31 @@ export function conversasView(req, res) {
       <aside class="conversas-list" id="conversasList">
         <p class="dash-empty">Carregando conversas...</p>
       </aside>
-      <section class="conversas-thread" id="conversasThread">
-        <p class="dash-empty">Selecione uma conversa à esquerda.</p>
+      <section class="conversas-main">
+        <header class="thread-header" id="threadHeader" hidden>
+          <div class="thread-who">
+            <div class="thread-title" id="threadTitle"></div>
+            <div class="thread-sub" id="threadSub"></div>
+          </div>
+          <span class="badge" id="threadStatus"></span>
+          <div class="thread-actions">
+            <button type="button" class="btn btn-secondary btn-sm" id="btnAssumir" hidden>Assumir</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="btnDevolver" hidden>Devolver à IA</button>
+          </div>
+        </header>
+        <div class="thread-presence" id="threadPresence" role="status" hidden></div>
+        <div class="conversas-thread" id="conversasThread">
+          <p class="dash-empty">Selecione uma conversa à esquerda.</p>
+        </div>
+        <div class="thread-window" id="threadWindow" role="status" hidden></div>
+        <form class="thread-composer" id="threadComposer" hidden>
+          <div class="thread-composer-row">
+            <textarea id="composerInput" class="field-textarea" rows="1" maxlength="4096"
+              placeholder="Escreva uma mensagem…  (Enter envia, Shift+Enter quebra a linha)"></textarea>
+            <button type="submit" class="btn btn-primary" id="composerSend">Enviar</button>
+          </div>
+          <div class="thread-composer-hint" id="composerHint"></div>
+        </form>
       </section>
     </div>
     <script src="/js/dashboard-conversas.js"></script>

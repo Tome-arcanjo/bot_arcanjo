@@ -1,7 +1,8 @@
 import "dotenv/config";
 import { getCaseById, updateCaseCall, getOverdueCalls, claimCallReminder } from "./crmService.js";
 import { sendWhatsAppMessage } from "./whatsappService.js";
-import { recordAssistantMessage } from "./chatService.js";
+import { getOrCreateSessionByPhone } from "./chatService.js";
+import { deliverMessage } from "./outboundService.js";
 
 /**
  * Ligação do cliente com o advogado.
@@ -96,31 +97,26 @@ export function computeDueReminder(scheduledAtMs, remindersSent, nowMs) {
 }
 
 /**
- * Envia uma mensagem do bot ao cliente e registra no histórico da conversa.
- * Retorna true se o WhatsApp aceitou a mensagem.
+ * Envia uma mensagem do bot ao cliente, registrada na conversa (aba Conversas)
+ * com o status da entrega. Retorna true se o WhatsApp aceitou a mensagem.
  *
  * Atenção: a API da Meta só aceita texto livre dentro de 24h da última mensagem
- * do cliente. Fora dessa janela o envio falha (é logado e o painel avisa o admin).
+ * do cliente. Fora dessa janela o envio nem é tentado: a mensagem fica na
+ * conversa como "não enviada" e o painel avisa o admin.
  */
 async function notifyClient(phone, text) {
   const to = String(phone || "").replace(/\D/g, "");
   if (!to) return false;
 
   try {
-    const sent = await sendWhatsAppMessage(to, text);
-    if (!sent) return false; // WhatsApp não configurado (o service já logou o aviso)
+    const session = await getOrCreateSessionByPhone(to);
+    const { ok, message } = await deliverMessage({ session, content: text, role: "assistant" });
+    if (!ok) console.error(`[Ligação] Não foi possível avisar o cliente ${to}: ${message.delivery_error}`);
+    return ok;
   } catch (error) {
     console.error(`[Ligação] Não foi possível avisar o cliente ${to}:`, error.message);
     return false;
   }
-
-  try {
-    await recordAssistantMessage(to, text);
-  } catch (error) {
-    // A mensagem já chegou ao cliente; só o registro no painel falhou.
-    console.error(`[Ligação] Aviso enviado a ${to}, mas não foi possível registrar no histórico:`, error.message);
-  }
-  return true;
 }
 
 // ── Ações do admin ──────────────────────────────────────────────────────
@@ -240,10 +236,11 @@ async function sendOverdueAlert(crmCase, { newSent, overdueMs }) {
     return;
   }
 
-  const results = await Promise.allSettled(phones.map((to) => sendWhatsAppMessage(to, text)));
+  // sendWhatsAppMessage nunca lança: devolve { ok, error }.
+  const results = await Promise.all(phones.map((to) => sendWhatsAppMessage(to, text)));
   results.forEach((r, i) => {
-    if (r.status === "rejected") {
-      console.error(`[Ligação] Falha ao avisar ${phones[i]} sobre o atraso do caso ${crmCase.id}:`, r.reason?.message);
+    if (!r.ok) {
+      console.error(`[Ligação] Falha ao avisar ${phones[i]} sobre o atraso do caso ${crmCase.id}: ${r.error}`);
     }
   });
   console.log(`[Ligação] Aviso ${newSent}/${MAX_REMINDERS} de atraso do caso ${crmCase.id} enviado a ${phones.length} número(s).`);
