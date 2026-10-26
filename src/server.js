@@ -10,7 +10,9 @@ import crmRoutes from "./routes/crmRoutes.js";
 import contatosRoutes from "./routes/contatosRoutes.js";
 import conversasRoutes from "./routes/conversasRoutes.js";
 import authRoutes from "./routes/auth.js";
-import { requireAuth } from "./middleware/auth.js";
+import { usersRouter, meRouter } from "./routes/usersRoutes.js";
+import { requireAuth, requireAdmin } from "./middleware/auth.js";
+import { sessionStore } from "./services/sessionStore.js";
 import { initDatabase } from "./database/db.js";
 import { loadSettingsFromDb } from "./services/settingsService.js";
 import { startCallReminderScheduler } from "./services/callService.js";
@@ -107,8 +109,18 @@ app.use(
 );
 app.use(express.urlencoded({ extended: true }));
 
+// Arquivos estáticos (css/js/imagens) precisam ficar acessíveis ANTES do
+// bloqueio de autenticação: a própria tela de login depende de
+// /css/brand.css e /img/logo-white.png para renderizar, e eles não têm
+// nenhum dado sensível — não há problema em servi-los sem login. Ficam antes
+// da sessão também, para não consultar o store de sessão a cada arquivo.
+app.use(express.static(path.join(__dirname, "../public")));
+
 app.use(
   session({
+    // Sessões gravadas no Supabase (web_sessions): sobrevivem a reinícios e
+    // podem ser derrubadas por usuário (ver services/sessionStore.js).
+    store: sessionStore,
     secret: SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
@@ -124,12 +136,6 @@ app.use(
 // Rotas de login/logout — precisam ficar acessíveis ANTES do bloqueio de
 // autenticação abaixo, senão ninguém conseguiria nem chegar à tela de login.
 app.use(authRoutes);
-
-// Arquivos estáticos (css/js/imagens) também precisam ficar acessíveis ANTES
-// do bloqueio de autenticação: a própria tela de login depende de
-// /css/brand.css e /img/logo-white.png para renderizar, e eles não têm
-// nenhum dado sensível — não há problema em servi-los sem login.
-app.use(express.static(path.join(__dirname, "../public")));
 
 // A partir daqui, tudo exige login — exceto o webhook do WhatsApp (ver
 // src/middleware/auth.js), que é protegido separadamente pela validação de
@@ -149,6 +155,8 @@ app.use((req, res, next) => {
 });
 
 // ── Rotas da API ──
+app.use("/api/me", meRouter);
+app.use("/api/users", usersRouter); // somente admin (requireAdmin dentro do router)
 app.use("/api/settings", settingsRoutes);
 app.use("/api/crm", crmRoutes);
 app.use("/api/contatos", contatosRoutes);
@@ -160,7 +168,7 @@ app.use("/webhook/whatsapp", whatsappRoutes);
 // — a versão atual dessa tela agora vive em /dashboard/canais.
 app.get("/admin", (req, res) => res.redirect("/dashboard/canais"));
 app.get("/dashboard", dashboardRoot);
-app.get("/dashboard/configuracoes", configuracoesView);
+app.get("/dashboard/configuracoes", requireAdmin, configuracoesView); // personalidade do bot: só admin
 app.get("/dashboard/crm", crmView);
 app.get("/dashboard/conversas", conversasView);
 app.get("/dashboard/contatos", contatosView);
@@ -193,6 +201,9 @@ async function start() {
     console.log(`  Webhook  : http://localhost:${PORT}/webhook/whatsapp`);
     console.log("=".repeat(50));
 
+    if (!process.env.ADMIN_PASSWORD_HASH) {
+      console.warn("[Auth] ADMIN_PASSWORD_HASH não configurado — não há acesso de emergência (só login pela tabela users).");
+    }
     if (!process.env.WHATSAPP_APP_SECRET) {
       console.warn("[WhatsApp] WHATSAPP_APP_SECRET não configurado — o webhook vai RECUSAR todas as mensagens da Meta.");
     }

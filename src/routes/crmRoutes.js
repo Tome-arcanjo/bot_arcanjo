@@ -1,6 +1,7 @@
 ﻿import { Router } from "express";
 import { getCases, createCase, updateCaseStatus, updateCaseTags, deleteCase } from "../services/crmService.js";
 import { scheduleCall, completeCall, cancelCall, getOverdueCallAlerts } from "../services/callService.js";
+import { requireAdmin } from "../middleware/auth.js";
 
 const router = Router();
 
@@ -32,8 +33,8 @@ router.post("/cases", async (req, res) => {
   }
 });
 
-// Exclui um caso permanentemente
-router.delete("/cases/:id", async (req, res) => {
+// Exclui um caso permanentemente — só admin
+router.delete("/cases/:id", requireAdmin, async (req, res) => {
   const { id } = req.params;
   try {
     const ok = await deleteCase(id);

@@ -28,6 +28,8 @@ bot_arcanjo/
 │   │   ├── crmService.js          # Acesso a dados de crm_cases (usado pelas rotas, pela IA e pelas ligações)
 │   │   ├── crmClassifierService.js # Classificação de casos + extração de contato via IA
 │   │   ├── settingsService.js     # Personalidade do bot (bot_settings, com cache em memória)
+│   │   ├── usersService.js        # Funcionários (users): login, CRUD, regras de papel, derrubar sessões
+│   │   ├── sessionStore.js        # Store do express-session no Supabase (web_sessions) + cache em memória
 │   │   └── callService.js         # Ligação com o advogado: agendar/remarcar/cancelar/concluir + avisos de atraso
 │   ├── providers/
 │   │   ├── anthropic.js           # Wrapper para Anthropic SDK (Claude)
@@ -46,9 +48,10 @@ bot_arcanjo/
 │   │   ├── conversasRoutes.js     # Rotas: /api/conversas
 │   │   ├── crmRoutes.js           # Rotas: /api/crm
 │   │   ├── settingsRoutes.js      # Rotas: /api/settings (personalidade do bot)
+│   │   ├── usersRoutes.js         # Rotas: /api/users (admin) e /api/me
 │   │   └── whatsapp.js            # Rotas: GET/POST /webhook/whatsapp
 │   └── middleware/
-│       └── auth.js                # requireAuth — bloqueia o painel para quem não fez login
+│       └── auth.js                # requireAuth (usuário em req.session.user) e requireAdmin
 ├── public/                        # Frontend estático (CSS/JS/imagens do painel)
 ├── test/                          # npm test — node:test + Supabase falso (test/fakes) via loader (test/support)
 ├── data/                          # Dados locais (se houver)
@@ -82,7 +85,7 @@ bot_arcanjo/
 | `WHATSAPP_PHONE_NUMBER_ID` | ID do número WhatsApp | `12345678` |
 | `WHATSAPP_VERIFY_TOKEN` | Token de verificação do webhook | `meu_token_secreto` |
 | `WHATSAPP_APP_SECRET` | OBRIGATÓRIO: valida a assinatura `X-Hub-Signature-256`. Sem ele o webhook responde 503 a tudo | `abc123...` |
-| `ADMIN_USERNAME` / `ADMIN_PASSWORD_HASH` | Login do painel (hash bcrypt de `scripts/gerar-senha.js`) | `admin` / `$2a$12$...` |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD_HASH` | Acesso de emergência ao painel (admin fora do banco; hash bcrypt de `scripts/gerar-senha.js`) | `admin` / `$2a$12$...` |
 | `SESSION_SECRET` | Assina o cookie de login. OBRIGATÓRIO em produção (o servidor não sobe sem ele) | `openssl rand -hex 32` |
 | `COOKIE_SECURE` | `auto` (padrão: Secure só se o proxy informar HTTPS), `true` ou `false` | `auto` |
 | `TRUST_PROXY` | Saltos de proxy confiáveis para `X-Forwarded-*` (padrão `1` = Nginx) | `1` |
@@ -108,8 +111,18 @@ bot_arcanjo/
 - `GET /admin` — Mantido só como redirecionamento de compatibilidade para `/dashboard/canais`
 - `GET /login`, `POST /login`, `GET /logout` — Autenticação (ver `src/routes/auth.js`)
 
+### Login, usuários e papéis
+- Cada funcionário entra com **e-mail + senha** (tabela `users`, bcrypt). `ADMIN_USERNAME`/`ADMIN_PASSWORD_HASH` do `.env` são o **acesso de emergência**: um admin virtual (`id: null`, `emergency: true`, nome "Admin (emergência)"), que não depende da tabela `users`.
+- `req.session.user = { id, name, email, role }`. As sessões ficam em `web_sessions` (`sessionStore.js`) e sobrevivem a `pm2 restart`.
+- **Papéis**: `admin` gerencia usuários (`/api/users`), exclui casos (`DELETE /api/crm/cases/:id`) e edita a personalidade do bot (`POST /api/settings`, `/dashboard/configuracoes`). `atendente` faz todo o resto. Use `requireAdmin` (de `middleware/auth.js`) em toda rota nova que seja só de admin.
+- **Derrubar acesso**: desativar, trocar o papel ou redefinir a senha apaga as sessões da pessoa (`sessionStore.destroyByUser`) e emite `userRevoked` no `eventBus`. **Todo SSE novo precisa escutar `userRevoked` e fechar a conexão do usuário.** Trocar a própria senha mantém só a sessão atual. Renomear atualiza as sessões abertas sem derrubar.
+- **Regras**: e-mail único (minúsculo); senha de 8 a 72 bytes; ninguém se rebaixa nem se desativa; sempre sobra um admin ativo; só se exclui definitivamente quem não tem histórico (senão, desativar).
+- Os sids encerrados ficam bloqueados por 30 min no store, para que uma requisição que estava em andamento (ex: SSE) não "ressuscite" a sessão ao terminar.
+
 ### APIs do painel
-- `/api/settings` — Personalidade do bot (usado pela aba Configurações)
+- `GET /api/me` — usuário logado. `PUT /api/me/password` `{ currentPassword, newPassword }` — troca a própria senha (com o mesmo limite de tentativas do login)
+- `/api/users` (admin) — `GET` lista, `POST` cria `{ name, email, password, role }`, `PATCH /:id` `{ name?, email?, role?, active? }`, `POST /:id/password` `{ password }`, `DELETE /:id` (só sem histórico)
+- `/api/settings` — Personalidade do bot (usado pela aba Configurações; salvar é só admin)
 - `/api/crm` — Casos do CRM (listar, mudar status, etiquetas, criar/excluir)
   - `PUT /api/crm/cases/:id/call` `{ scheduledAt }` — agenda a ligação; se já houver uma pendente, remarca e o bot avisa o cliente
   - `POST /api/crm/cases/:id/call/complete` — marca a ligação como concluída

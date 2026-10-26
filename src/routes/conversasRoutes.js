@@ -88,12 +88,24 @@ router.get("/stream", (req, res) => {
     }
   }, 25000);
 
+  // Usuário desativado / com papel ou senha trocados: as sessões dele já
+  // foram apagadas, mas esta conexão aberta continuaria recebendo mensagens.
+  const userId = req.session.user?.id;
+  const onUserRevoked = ({ userId: revokedId }) => {
+    if (userId && revokedId === userId) {
+      cleanup();
+      res.end();
+    }
+  };
+
   function cleanup() {
     clearInterval(heartbeat);
     eventBus.off("newMessage", sendEvent);
+    eventBus.off("userRevoked", onUserRevoked);
   }
 
   eventBus.on("newMessage", sendEvent);
+  eventBus.on("userRevoked", onUserRevoked);
 
   req.on("close", cleanup);
   res.on("error", (err) => {

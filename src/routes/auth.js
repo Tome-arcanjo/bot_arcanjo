@@ -2,13 +2,36 @@ import { Router } from "express";
 import bcrypt from "bcryptjs";
 import "dotenv/config";
 import { loginRetryAfterMs, registerLoginFailure, clearLoginFailures } from "../utils/loginLimiter.js";
+import { verifyCredentials, sessionUser } from "../services/usersService.js";
 
 const router = Router();
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "admin";
 const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH;
 
+// Acesso de emergência (ADMIN_USERNAME/ADMIN_PASSWORD_HASH do .env): admin
+// sem linha na tabela users, para ninguém ficar trancado do lado de fora
+// (ex: antes de cadastrar o primeiro usuário, ou se todos esquecerem a senha).
+const EMERGENCY_USER = Object.freeze({
+  id: null,
+  name: "Admin (emergência)",
+  email: null,
+  role: "admin",
+  emergency: true,
+});
+
+async function isEmergencyLogin(username, password) {
+  return (
+    Boolean(ADMIN_PASSWORD_HASH) &&
+    typeof username === "string" &&
+    username === ADMIN_USERNAME &&
+    typeof password === "string" &&
+    password.length > 0 &&
+    (await bcrypt.compare(password, ADMIN_PASSWORD_HASH))
+  );
+}
+
 router.get("/login", (req, res) => {
-  if (req.session && req.session.authenticated) return res.redirect("/dashboard");
+  if (req.session && req.session.user) return res.redirect("/dashboard");
   res.send(buildLoginHTML());
 });
 
@@ -25,38 +48,46 @@ router.post("/login", async (req, res) => {
       .send(buildLoginHTML(`Muitas tentativas de login. Tente novamente em ${minutes} min.`));
   }
 
-  if (!ADMIN_PASSWORD_HASH) {
-    console.error("[Auth] ADMIN_PASSWORD_HASH não configurado no .env — login está bloqueado.");
-    return res.send(
-      buildLoginHTML(
-        "Login não configurado no servidor. Gere uma senha com scripts/gerar-senha.js e adicione ADMIN_PASSWORD_HASH ao .env."
-      )
-    );
+  let user = null;
+  if (await isEmergencyLogin(username, password)) {
+    user = EMERGENCY_USER;
+    console.warn(`[Auth] Login com o ACESSO DE EMERGÊNCIA do .env (IP ${req.ip}).`);
+  } else {
+    try {
+      const row = await verifyCredentials(username, password);
+      if (row) user = sessionUser(row);
+    } catch (error) {
+      // Banco indisponível ou migração não aplicada: não conta como senha errada.
+      return res
+        .status(503)
+        .send(buildLoginHTML("Não foi possível conferir o login agora. Tente novamente em instantes."));
+    }
   }
 
-  const validUsername = typeof username === "string" && username === ADMIN_USERNAME;
-  const validPassword =
-    typeof password === "string" &&
-    password.length > 0 &&
-    (await bcrypt.compare(password, ADMIN_PASSWORD_HASH));
+  if (!user) {
+    registerLoginFailure(req.ip, username);
+    console.warn(`[Auth] Tentativa de login falhou para "${username}" (IP ${req.ip})`);
+    return res.send(buildLoginHTML("E-mail ou senha incorretos."));
+  }
 
-  if (validUsername && validPassword) {
-    clearLoginFailures(req.ip, username);
-    // Troca o id da sessão no login (evita fixação de sessão: um id plantado
-    // antes do login não passa a valer como sessão autenticada).
-    return req.session.regenerate((err) => {
-      if (err) {
-        console.error("[Auth] Erro ao criar a sessão:", err.message);
+  clearLoginFailures(req.ip, username);
+  // Troca o id da sessão no login (evita fixação de sessão: um id plantado
+  // antes do login não passa a valer como sessão autenticada).
+  req.session.regenerate((err) => {
+    if (err) {
+      console.error("[Auth] Erro ao criar a sessão:", err.message);
+      return res.status(500).send(buildLoginHTML("Erro ao entrar. Tente novamente."));
+    }
+    req.session.user = { ...user };
+    req.session.save((saveErr) => {
+      if (saveErr) {
+        console.error("[Auth] Erro ao salvar a sessão:", saveErr.message);
         return res.status(500).send(buildLoginHTML("Erro ao entrar. Tente novamente."));
       }
-      req.session.authenticated = true;
-      req.session.save(() => res.redirect("/dashboard"));
+      if (!user.emergency) console.log(`[Auth] ${user.name} (${user.role}) entrou no painel.`);
+      res.redirect("/dashboard");
     });
-  }
-
-  registerLoginFailure(req.ip, username);
-  console.warn(`[Auth] Tentativa de login falhou para usuário "${username}" (IP ${req.ip})`);
-  res.send(buildLoginHTML("Usuário ou senha incorretos."));
+  });
 });
 
 router.get("/logout", (req, res) => {
@@ -122,8 +153,8 @@ function buildLoginHTML(error) {
     <div class="subtitle">Acesso restrito ao painel</div>
     ${error ? `<div class="error-msg">${escapeHtml(error)}</div>` : ""}
     <form method="POST" action="/login">
-      <label for="username">Usuário</label>
-      <input type="text" id="username" name="username" autocomplete="username" required autofocus />
+      <label for="username">E-mail</label>
+      <input type="text" id="username" name="username" autocomplete="username" inputmode="email" required autofocus />
       <label for="password">Senha</label>
       <input type="password" id="password" name="password" autocomplete="current-password" required />
       <button type="submit">Entrar</button>

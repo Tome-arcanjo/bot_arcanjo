@@ -98,7 +98,9 @@ bot_arcanjo/
 
 | Rota | Descrição |
 |------|-----------|
-| `/api/settings` | Personalidade do bot |
+| `/api/me` | Usuário logado; `PUT /api/me/password` troca a própria senha |
+| `/api/users` | Gestão de funcionários (somente admin) |
+| `/api/settings` | Personalidade do bot (salvar: somente admin) |
 | `/api/crm` | Casos do CRM (listar, mudar status) |
 | `/api/contatos` | Lista/busca de clientes |
 | `/api/conversas` | Sessões e mensagens |
@@ -287,7 +289,7 @@ location / {
 | `WHATSAPP_PHONE_NUMBER_ID` | (opcional) | — | ID número WhatsApp |
 | `WHATSAPP_VERIFY_TOKEN` | (opcional) | — | Token verificação webhook |
 | `WHATSAPP_APP_SECRET` | ✅ | — | Valida a assinatura do webhook; sem ele o webhook recusa tudo (503) |
-| `ADMIN_USERNAME` / `ADMIN_PASSWORD_HASH` | ✅ | `admin` / — | Login do painel (hash gerado por `scripts/gerar-senha.js`) |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD_HASH` | ✅ | `admin` / — | Acesso de emergência ao painel (os funcionários entram com e-mail e senha próprios) |
 | `SESSION_SECRET` | ✅ em produção | — | Assina o cookie de login; o servidor não sobe em produção sem ele |
 | `COOKIE_SECURE` | ❌ | `auto` | `auto`, `true` ou `false` (ver seção Nginx) |
 | `TRUST_PROXY` | ❌ | `1` | Saltos de proxy confiáveis para `X-Forwarded-*` |

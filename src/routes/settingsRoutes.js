@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { getSettings, updateSettings } from "../services/settingsService.js";
+import { requireAdmin } from "../middleware/auth.js";
 
 const router = Router();
 
@@ -13,8 +14,8 @@ router.get("/", (req, res) => {
   }
 });
 
-// Atualizar o system prompt (personalidade/contexto)
-router.post("/", async (req, res) => {
+// Atualizar o system prompt (personalidade/contexto) — só admin
+router.post("/", requireAdmin, async (req, res) => {
   try {
     const { systemPrompt } = req.body;
     
