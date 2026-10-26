@@ -60,6 +60,7 @@ bot_arcanjo/
 ├── public/                          # Frontend estático do painel (CSS/JS/imagens)
 ├── test/                            # Testes (npm test) — Supabase falso, sem dependências extras
 ├── init.sql                         # Script SQL para criar tabelas
+├── migrations/                      # Migrações avulsas (colar no Supabase) + rollback
 ├── ecosystem.config.cjs             # Configuração PM2
 ├── .env                             # Variáveis de ambiente (não commitar)
 ├── .env.example                     # Template de .env
@@ -129,6 +130,14 @@ bot_arcanjo/
 | `created_at` | TIMESTAMPTZ | Data de criação |
 
 **Nota:** O histórico enviado para IA é limitado às últimas **10 mensagens** para otimizar tokens.
+
+### Multiusuário (usuários, sessões de login, responsáveis e histórico)
+
+Adicionado por `migrations/2026-10-26_multiusuario.sql` (o mesmo bloco está no fim do `init.sql`). Tabelas novas: `users`, `web_sessions` e `case_events`. Colunas novas em `sessions` (pausa da IA e responsável), `messages` (papel `human`, autor e status de entrega) e `crm_cases` (responsável e última movimentação). Detalhes no `CLAUDE.md`.
+
+Para aplicar no Supabase, cole o arquivo no SQL Editor ou rode `npm run db:migrate`. O script é idempotente e não apaga dados. O rollback fica em `migrations/2026-10-26_multiusuario.rollback.sql` e **apaga** usuários e histórico.
+
+Para testar o SQL num Postgres local: `PG_TEST_URL=postgres://usuario@127.0.0.1:5432/banco npm test`. Os testes usam um schema temporário e o apagam no fim.
 
 ---
 

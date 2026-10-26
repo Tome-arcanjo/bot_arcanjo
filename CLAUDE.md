@@ -53,7 +53,8 @@ bot_arcanjo/
 ├── test/                          # npm test — node:test + Supabase falso (test/fakes) via loader (test/support)
 ├── data/                          # Dados locais (se houver)
 ├── logs/                          # Logs do PM2 (out.log, error.log)
-├── init.sql                       # Script SQL para criar tabelas no Supabase
+├── init.sql                       # Script SQL para criar tabelas no Supabase (fonte da verdade, idempotente)
+├── migrations/                    # Blocos avulsos para colar no Supabase + rollback de cada um
 ├── ecosystem.config.cjs           # Configuração PM2 para produção
 ├── .env                           # Variáveis de ambiente (NÃO commitar)
 ├── .env.example                   # Template de variáveis de ambiente
@@ -151,6 +152,18 @@ O admin agenda a ligação pelo card do caso no CRM (a IA nunca agenda). Colunas
 - **Atraso (opcional, WhatsApp)**: se `CALL_ALERT_PHONES` estiver preenchido, `callService.startCallReminderScheduler()` (boot, a cada 1 min) também manda o mesmo cronograma de avisos por WhatsApp. Concluir, cancelar ou remarcar encerra/zera os avisos.
 - Limitação da Meta: texto livre só é entregue a quem falou com o bot nas últimas 24 h; fora disso o envio falha (vale para o aviso ao cliente e para `CALL_ALERT_PHONES`; o painel avisa o admin quando o cliente não pôde ser notificado).
 - As colunas vêm de `init.sql` — rode `npm run db:migrate` (ou o SQL no Supabase) ao atualizar.
+
+### Multiusuário (`migrations/2026-10-26_multiusuario.sql`, também no fim do `init.sql`)
+- `users`: `id`, `name`, `email` (único sem diferenciar maiúsculas, índice em `lower(email)`), `password_hash` (bcrypt), `role` (`admin` | `atendente`), `active`. Usuários não são apagados, só desativados (preserva autoria).
+- `web_sessions`: store das sessões de login (`sid`, `sess` JSONB, `expire`, `user_id` com `ON DELETE CASCADE`).
+- `sessions` ganha `ai_paused`, `ai_paused_at`, `handler_user_id` (quem está atendendo a conversa).
+- `messages`: `role` aceita `human` (mensagem escrita por funcionário), mais `sender_user_id`, `delivery_status` (`pending` | `sent` | `delivered` | `read` | `failed`, NULL para mensagens recebidas/antigas), `delivery_error` e `wa_message_id` (liga aos status que a Meta envia depois pelo webhook).
+- `crm_cases` ganha `assigned_to`, `assigned_at`, `status_changed_by`, `status_changed_by_name`, `status_changed_at`.
+- `case_events`: histórico (`case_id` e `session_id` **sem FK** de propósito, para o evento `deleted` sobreviver; `user_id` + `actor_name`; `type` em `created` | `moved` | `assigned` | `deleted` | `tags` | `call` | `ai_paused` | `ai_resumed`; `from_value`/`to_value`).
+- RLS ligado (sem policies) em `users`, `web_sessions` e `case_events`: só a service role key acessa. Se aparecer erro de "row-level security", o `SUPABASE_KEY` não é a service role.
+- Rollback: `migrations/2026-10-26_multiusuario.rollback.sql` (apaga as tabelas/colunas novas; mensagens `human` viram `assistant`).
+- FKs para `users` usam `ON DELETE SET NULL`; o `actor_name` em `case_events` mantém o nome.
+- SQL novo deve ser testado num Postgres real: `PG_TEST_URL=postgres://... npm test` (sem a variável, `test/fase1-sql.test.js` é pulado).
 
 > **Importante**: O histórico enviado para a IA é limitado às últimas **10 mensagens** da sessão para controlar o uso de tokens.
 
