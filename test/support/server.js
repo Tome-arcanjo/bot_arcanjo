@@ -14,7 +14,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const SERVER_PATH = path.join(ROOT, "src/server.js");
 const REGISTER_URL = pathToFileURL(path.join(ROOT, "test/support/register.mjs")).href;
 
-function freePort() {
+export function freePort() {
   return new Promise((resolve, reject) => {
     const srv = net.createServer();
     srv.unref();

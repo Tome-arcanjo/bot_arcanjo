@@ -46,7 +46,7 @@ Responda sempre em português, de forma breve.">Triagem (recomendado)</button>
     <script src="/js/dashboard-configuracoes.js"></script>
   `;
 
-  res.send(renderDashboardLayout({ active: "configuracoes", title: "Configurações", content }));
+  res.send(renderDashboardLayout({ active: "configuracoes", title: "Configurações", content, user: req.session.user }));
 }
 
 // ── Canais (histórico bruto de mensagens — antigo /admin) ─────────────
@@ -77,7 +77,9 @@ export async function canaisView(req, res) {
       const origin = session.phone ? `📱 ${session.phone}` : `💻 ${session.title || "Web"}`;
       const roleBadge = m.role === "user"
         ? `<span class="badge badge-blue">Cliente</span>`
-        : `<span class="badge badge-gold">Bot</span>`;
+        : m.role === "human"
+          ? `<span class="badge badge-green">Equipe</span>`
+          : `<span class="badge badge-gold">Bot</span>`;
       const date = new Date(m.created_at).toLocaleString("pt-BR");
       const preview = (m.content || "").substring(0, 300).replace(/</g, "&lt;").replace(/>/g, "&gt;");
       return `<tr><td>${date}</td><td>${roleBadge}</td><td>${origin}</td><td style="max-width:480px; white-space:pre-wrap; word-break:break-word;">${preview}</td></tr>`;
@@ -98,7 +100,7 @@ export async function canaisView(req, res) {
     `;
 
     const topbarActions = `<a href="/dashboard/canais" class="btn btn-secondary">↺ Atualizar</a>`;
-    res.send(renderDashboardLayout({ active: "canais", title: "Canais", content, topbarActions }));
+    res.send(renderDashboardLayout({ active: "canais", title: "Canais", content, topbarActions, user: req.session.user }));
   } catch (error) {
     console.error("[Canais] Erro ao carregar:", error.message);
     res.status(500).send(`<pre>Erro: ${error.message}</pre>`);
@@ -170,6 +172,7 @@ export function crmView(req, res) {
     topbarActions,
     extraHead: `<link rel="stylesheet" href="/css/dashboard-crm.css" />`,
     hideBack: true,
+    user: req.session.user,
   }));
 }
 
@@ -192,6 +195,7 @@ export function conversasView(req, res) {
     content,
     extraHead: `<link rel="stylesheet" href="/css/dashboard-conversas.css" />`,
     bodyClass: "no-content-scroll",
+    user: req.session.user,
   }));
 }
 
@@ -213,5 +217,101 @@ export function contatosView(req, res) {
     </div>
     <script src="/js/dashboard-contatos.js"></script>
   `;
-  res.send(renderDashboardLayout({ active: "contatos", title: "Contatos", content }));
+  res.send(renderDashboardLayout({ active: "contatos", title: "Contatos", content, user: req.session.user }));
+}
+
+// ── Usuários (somente admin — ver requireAdmin em server.js) ───────────
+export function usuariosView(req, res) {
+  const content = `
+    <p style="color:var(--text-secondary); font-size:0.86rem; margin:0 0 16px; max-width:760px;">
+      Cada pessoa da equipe entra com o próprio e-mail e senha. <strong>Administradores</strong> gerenciam usuários,
+      excluem casos e editam a personalidade do bot; <strong>atendentes</strong> fazem todo o resto.
+      Quem já tem histórico no sistema é desativado em vez de excluído.
+    </p>
+    <div class="dash-card dash-table-wrapper">
+      <table class="dash-table usuarios-table">
+        <thead>
+          <tr><th>Nome</th><th>E-mail</th><th>Papel</th><th>Situação</th><th>Criado em</th><th></th></tr>
+        </thead>
+        <tbody id="usuariosTbody">
+          <tr><td colspan="6" class="dash-empty">Carregando usuários...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="modal-overlay" id="usuarioOverlay">
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="usuarioTitulo">
+        <div class="modal-header">
+          <h2 id="usuarioTitulo">Novo usuário</h2>
+          <button type="button" class="modal-close" data-close aria-label="Fechar">✕</button>
+        </div>
+        <form id="usuarioForm" autocomplete="off">
+          <div class="modal-body">
+            <label class="field-label" for="usuarioNome">Nome *</label>
+            <input type="text" id="usuarioNome" class="field-input" maxlength="100" required />
+
+            <label class="field-label" for="usuarioEmail" style="margin-top:14px;">E-mail *</label>
+            <input type="email" id="usuarioEmail" class="field-input" maxlength="200" required />
+
+            <label class="field-label" for="usuarioPapel" style="margin-top:14px;">Papel</label>
+            <select id="usuarioPapel" class="field-input">
+              <option value="atendente">Atendente</option>
+              <option value="admin">Administrador</option>
+            </select>
+
+            <div id="usuarioSenhaWrap">
+              <label class="field-label" for="usuarioSenha" style="margin-top:14px;">Senha inicial *</label>
+              <input type="password" id="usuarioSenha" class="field-input" minlength="8" autocomplete="new-password" />
+              <p class="modal-hint">Pelo menos 8 caracteres. Passe para a pessoa e peça que ela troque em "Minha conta".</p>
+            </div>
+
+            <p id="usuarioErro" class="modal-error" style="display:none;"></p>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-close>Cancelar</button>
+            <button type="submit" class="btn btn-primary" id="usuarioSalvar">Criar usuário</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="senhaOverlay">
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="senhaTitulo">
+        <div class="modal-header">
+          <h2 id="senhaTitulo">Redefinir senha</h2>
+          <button type="button" class="modal-close" data-close aria-label="Fechar">✕</button>
+        </div>
+        <form id="senhaForm" autocomplete="off">
+          <div class="modal-body">
+            <p id="senhaQuem" style="margin:0 0 14px; font-size:0.86rem; color:var(--text-secondary);"></p>
+            <label class="field-label" for="senhaNova">Nova senha *</label>
+            <input type="password" id="senhaNova" class="field-input" minlength="8" autocomplete="new-password" required />
+            <p class="modal-hint">A pessoa será desconectada de todos os dispositivos.</p>
+            <p id="senhaErro" class="modal-error" style="display:none;"></p>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-close>Cancelar</button>
+            <button type="submit" class="btn btn-primary" id="senhaSalvar">Redefinir</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script src="/js/dashboard-usuarios.js"></script>
+  `;
+  const topbarActions = `<button type="button" class="btn btn-primary" id="btnNovoUsuario">+ Novo usuário</button>`;
+  res.send(renderDashboardLayout({
+    active: "usuarios",
+    title: "Usuários",
+    content,
+    topbarActions,
+    extraHead: `<link rel="stylesheet" href="/css/dashboard-usuarios.css" />`,
+    user: req.session.user,
+  }));
+}
+
+// Página de "acesso restrito" no layout do painel (usada por requireAdmin).
+export function forbiddenView(req, res) {
+  const content = `<div class="dash-card"><p class="dash-empty">Esta área é restrita a administradores.</p></div>`;
+  res.status(403).send(renderDashboardLayout({ active: "", title: "Acesso restrito", content, user: req.session.user }));
 }

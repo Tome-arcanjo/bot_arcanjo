@@ -130,76 +130,7 @@
   flex-wrap: wrap;
 }
 
-/* ── Modais ── */
-.modal-overlay {
-  display: none;
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.62);
-  backdrop-filter: blur(2px);
-  align-items: center;
-  justify-content: center;
-  z-index: 100;
-  padding: 20px;
-}
-
-.modal-overlay.open {
-  display: flex;
-}
-
-.modal-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  width: 100%;
-  max-width: 440px;
-  box-shadow: var(--shadow-md);
-}
-
-.modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--border);
-}
-
-.modal-header h2 {
-  margin: 0;
-  font-size: 0.95rem;
-  font-weight: 600;
-}
-
-.modal-close {
-  width: 26px;
-  height: 26px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 0.8rem;
-  cursor: pointer;
-}
-
-.modal-close:hover { color: var(--text-primary); background: var(--bg-hover); }
-
-.modal-body {
-  padding: 18px 20px;
-}
-
-.modal-error {
-  color: var(--danger);
-  font-size: 0.8rem;
-  margin: 12px 0 0;
-}
-
-.modal-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 14px 20px;
-  border-top: 1px solid var(--border);
-}
+/* (Os estilos de modal .modal-* ficam em brand.css — são usados em todas as telas.) */
 
 /* ── Ligação com o advogado ── */
 .crm-call-alert {

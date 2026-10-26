@@ -119,6 +119,13 @@ bot_arcanjo/
 - **Regras**: e-mail único (minúsculo); senha de 8 a 72 bytes; ninguém se rebaixa nem se desativa; sempre sobra um admin ativo; só se exclui definitivamente quem não tem histórico (senão, desativar).
 - Os sids encerrados ficam bloqueados por 30 min no store, para que uma requisição que estava em andamento (ex: SSE) não "ressuscite" a sessão ao terminar.
 
+### Layout e frontend compartilhado
+- `renderDashboardLayout({ ..., user: req.session.user })`: **toda view do painel deve passar `user`**. Ele mostra nome e papel no rodapé da sidebar (clicando abre o modal "Minha conta" para trocar a senha), esconde os itens `adminOnly` do menu ("Configurações" e "Usuários") de quem não é admin e mostra a faixa de aviso no acesso de emergência.
+- `window.Dash` (de `public/js/dashboard-common.js`, carregado no `<head>` antes dos scripts da página): `me` (usuário logado), `escapeHtml`, `initials`, `avatarHtml(user)`, `timeAgo(iso)` e `api(url, { method, body })`, que faz fetch JSON no padrão `{ success, error }`, lança `Error(error)` e manda para `/login` em caso de 401. Use isso em telas novas em vez de duplicar helpers.
+- Classes compartilhadas em `brand.css`: `.modal-*` (antes ficavam só no CRM), `.avatar` (`.is-me` = anel dourado, `.avatar-empty` = sem responsável), `.btn-sm` e `.btn-danger`.
+- `requireAdmin` responde às telas com `forbiddenView` (403 dentro do layout) e às APIs com JSON 403.
+- `GET /dashboard/usuarios` (admin) — tela de Usuários (`dashboard-usuarios.js/.css`).
+
 ### APIs do painel
 - `GET /api/me` — usuário logado. `PUT /api/me/password` `{ currentPassword, newPassword }` — troca a própria senha (com o mesmo limite de tentativas do login)
 - `/api/users` (admin) — `GET` lista, `POST` cria `{ name, email, password, role }`, `PATCH /:id` `{ name?, email?, role?, active? }`, `POST /:id/password` `{ password }`, `DELETE /:id` (só sem histórico)
@@ -251,6 +258,8 @@ npm run db:migrate
 - **Segurança de base**: o webhook recusa (503) sem `WHATSAPP_APP_SECRET`; produção não sobe sem `SESSION_SECRET`; login limitado a 5 erros por IP+usuário e 20 por IP a cada 15 min; o id da sessão é regenerado no login. Não há `cors()` (o painel é same-origin).
 - **Proxy**: atrás de Nginx (e Cloudflare), o `X-Forwarded-Proto` decide se o cookie é `Secure`. O log `[Server] Requisição chegou como HTTP em produção` indica proxy mal configurado (ver README, seção Nginx).
 - **Testes**: `test/support/loader.mjs` troca `@supabase/supabase-js` por `test/fakes/supabase.js` (banco em um JSON temporário). O fake não valida colunas/CHECKs — SQL novo precisa ser conferido num Postgres de verdade.
+- **Testes de tela**: `test/support/browser.js` controla Chrome/Edge headless pelo DevTools Protocol (WebSocket nativo do Node, sem puppeteer). Cada `newPage()` é um contexto isolado, o que permite vários usuários logados ao mesmo tempo. `page.errors` reúne erros de JS e `page.httpErrors` as respostas 4xx/5xx. Sem navegador instalado, os testes de tela são pulados. `CHROME_PATH` escolhe o executável e `SCREENSHOT_DIR` define onde salvar os prints.
+- **Cuidado ao editar**: não escreva escapes de U+2028/U+2029 (separadores de linha) dentro de regex literal (a ferramenta de edição pode gravar o caractere real e quebrar a sintaxe). Use `new RegExp(String.fromCharCode(0x2028), "g")`. O teste "sintaxe válida" cobre `public/js`; para `src`, rode `node --check`.
 - A pasta `logs/` é criada automaticamente pelo PM2; não precisa ser commitada.
 - O frontend estático fica em `public/` — qualquer arquivo lá é servido diretamente pelo Express.
 - Supabase é o único banco — não há SQLite ou banco local.

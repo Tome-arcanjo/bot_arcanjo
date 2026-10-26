@@ -23,6 +23,7 @@ import {
   crmView,
   conversasView,
   contatosView,
+  usuariosView,
 } from "./controllers/dashboardController.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -173,6 +174,7 @@ app.get("/dashboard/crm", crmView);
 app.get("/dashboard/conversas", conversasView);
 app.get("/dashboard/contatos", contatosView);
 app.get("/dashboard/canais", canaisView);
+app.get("/dashboard/usuarios", requireAdmin, usuariosView);
 
 // ── Landing (raiz do domínio) ──
 // A raiz do site agora vai direto pro painel — a antiga interface de chat de

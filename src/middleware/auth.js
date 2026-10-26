@@ -1,3 +1,5 @@
+import { forbiddenView } from "../controllers/dashboardController.js";
+
 /**
  * Middleware que exige login para acessar o painel (dashboard + APIs).
  *
@@ -34,5 +36,5 @@ export function requireAdmin(req, res, next) {
   if (req.originalUrl.startsWith("/api/")) {
     return res.status(403).json({ success: false, error: "Apenas administradores podem fazer isso." });
   }
-  return res.status(403).send("Acesso restrito a administradores. <a href=\"/dashboard\">Voltar ao painel</a>");
+  return forbiddenView(req, res);
 }

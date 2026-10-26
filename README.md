@@ -90,6 +90,7 @@ bot_arcanjo/
 | `GET` | `/dashboard/conversas` | Inbox de conversas por cliente |
 | `GET` | `/dashboard/contatos` | Lista de clientes (captura automática via IA) |
 | `GET` | `/dashboard/canais` | Tabela de mensagens (antigo `/admin`) |
+| `GET` | `/dashboard/usuarios` | Gestão da equipe (somente admin) |
 | `GET` | `/admin` | Redirecionamento de compatibilidade para `/dashboard/canais` |
 | `GET`/`POST` | `/login` | Autenticação |
 | `GET` | `/logout` | Encerra a sessão |
@@ -178,8 +179,10 @@ npm run dev
 # Produção
 npm start
 
-# Testes (sobem o servidor de verdade com um Supabase falso em memória)
+# Testes (sobem o servidor de verdade com um Supabase falso em memória;
+# os testes de tela usam o Chrome/Edge instalado, em modo headless)
 npm test
+# opcionais: PG_TEST_URL=... (SQL num Postgres real), CHROME_PATH=..., SCREENSHOT_DIR=...
 
 # PM2 - Produção (daemon)
 pm2 start ecosystem.config.cjs --env production
