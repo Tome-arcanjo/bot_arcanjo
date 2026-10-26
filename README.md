@@ -10,6 +10,7 @@ Chatbot inteligente com suporte a múltiplos provedores de IA (OpenAI e Anthropi
 - ✅ **Histórico de conversas**: Persistência no Supabase (PostgreSQL)
 - ✅ **Integração WhatsApp**: Recebe e envia mensagens via Meta WhatsApp Business API
 - ✅ **Painel administrativo**: Configurações do bot, CRM (Kanban com drag-and-drop), inbox de conversas, lista de contatos e canais — protegido por login
+- ✅ **Equipe com login próprio**: administradores e atendentes, Kanban compartilhado em tempo real (responsável por caso, histórico de quem moveu) e atendimento humano direto pelo painel (assumir a conversa pausa a IA)
 - ✅ **Escalável**: Pronto para produção com PM2
 
 **Stack técnico:**
@@ -33,7 +34,12 @@ bot_arcanjo/
 │   │   ├── chatService.js           # Lógica de negócio (sessões, mensagens, IA)
 │   │   ├── whatsappService.js       # Envio de mensagens WhatsApp
 │   │   ├── clientsService.js        # CRUD da tabela de contatos (clients)
-│   │   ├── crmService.js            # Acesso a dados dos casos do CRM (crm_cases)
+│   │   ├── crmService.js            # Casos do CRM: grava histórico e avisa todos os quadros (tempo real)
+│   │   ├── caseEventsService.js     # Histórico dos casos (case_events)
+│   │   ├── outboundService.js       # Toda mensagem enviada ao cliente (status de entrega, janela de 24 h)
+│   │   ├── handoverService.js       # Atendimento humano: assumir / devolver à IA / presença
+│   │   ├── usersService.js          # Funcionários (login, papéis)
+│   │   ├── sessionStore.js          # Sessões de login no Supabase
 │   │   ├── crmClassifierService.js  # Classificação de casos + extração de contato via IA
 │   │   ├── settingsService.js       # Personalidade do bot (bot_settings)
 │   │   └── callService.js           # Ligação com o advogado (agendar/remarcar/cancelar + avisos de atraso)
@@ -43,8 +49,11 @@ bot_arcanjo/
 │   ├── database/
 │   │   ├── db.js                    # Cliente Supabase (singleton)
 │   │   └── migrate.js               # npm run db:migrate (roda o init.sql)
+│   ├── constants/
+│   │   └── crm.js                   # Colunas do Kanban
 │   ├── utils/
 │   │   ├── events.js                # eventBus (tempo real do painel via SSE)
+│   │   ├── sse.js                   # Streams SSE do painel
 │   │   └── loginLimiter.js          # Limite de tentativas de login (em memória)
 │   ├── views/
 │   │   └── dashboardLayout.js       # Layout compartilhado do painel
@@ -58,6 +67,9 @@ bot_arcanjo/
 │   └── middleware/
 │       └── auth.js                  # requireAuth — protege o painel
 ├── public/                          # Frontend estático do painel (CSS/JS/imagens)
+├── scripts/
+│   ├── gerar-senha.js               # Hash bcrypt para ADMIN_PASSWORD_HASH
+│   └── simular-mensagem.js          # Simula um cliente escrevendo no WhatsApp (webhook assinado)
 ├── test/                            # Testes (npm test) — Supabase falso, sem dependências extras
 ├── init.sql                         # Script SQL para criar tabelas
 ├── migrations/                      # Migrações avulsas (colar no Supabase) + rollback
@@ -237,6 +249,48 @@ npm run db:migrate
    ```
 
 ---
+
+## 🚀 Checklist de deploy (equipe multiusuário)
+
+Faça nesta ordem. Até o número de produção da Meta existir, mantenha `WHATSAPP_SEND_ENABLED=false`: nada é enviado de verdade, e as mensagens aparecem no painel como "Não enviada".
+
+1. **Backup** do banco no Supabase (Database → Backups) antes de qualquer mudança.
+2. **SQL**: cole `migrations/2026-10-26_multiusuario.sql` no SQL Editor do Supabase (ou rode `npm run db:migrate`). O script é idempotente e não apaga nada. Confira se as tabelas `users`, `web_sessions` e `case_events` apareceram.
+3. **`.env` na VPS** (veja o `.env.example`):
+   - `SESSION_SECRET` (`openssl rand -hex 32`): obrigatório em produção;
+   - `WHATSAPP_APP_SECRET`: sem ele o webhook recusa tudo;
+   - `ADMIN_USERNAME` / `ADMIN_PASSWORD_HASH` (acesso de emergência);
+   - `COOKIE_SECURE=auto`, `TRUST_PROXY=1`;
+   - `WHATSAPP_SEND_ENABLED=false` e, se quiser treinar a equipe, `WHATSAPP_SIMULATE=true`.
+4. **Deploy do código**: `git pull`, depois `npm ci --omit=dev` e `pm2 restart bot-arcanjo --update-env`. Confira `pm2 logs bot-arcanjo`: precisa aparecer `[DB] Conectado ao Supabase` e nenhum erro de `web_sessions`.
+5. **Login de emergência**: entre com o `ADMIN_USERNAME` no campo "E-mail". Uma faixa laranja confirma o acesso de emergência.
+6. **Criar os usuários**: em **Usuários → + Novo usuário**, cadastre pelo menos um administrador real e os atendentes. Cada pessoa entra com o próprio e-mail e troca a senha em **Minha conta** (clique no nome, no rodapé da barra lateral). Teste o login de cada uma.
+7. **Trocar para produção**: `pm2 delete bot-arcanjo`, depois `pm2 start ecosystem.config.cjs --env production` e `pm2 save`. Nos logs deve aparecer `Ambiente : production`.
+   - Se aparecer `[Server] Requisição chegou como HTTP em produção`, ajuste o Nginx/Cloudflare (seção abaixo).
+   - Quando o aviso sumir, troque para `COOKIE_SECURE=true`.
+8. **Conferência rápida**:
+   - duas pessoas abrem o CRM: o indicador "Ao vivo" fica verde, e um card movido por uma aparece na hora para a outra;
+   - com `WHATSAPP_SIMULATE=true`, rode `node scripts/simular-mensagem.js 5511999999999 "Olá"` na VPS. A conversa aparece em Conversas, com a resposta da IA "Enviada (simulado)".
+9. **Rollback**: volte o código para a versão anterior (`git checkout <versão>`) e rode `pm2 restart bot-arcanjo`. As colunas novas não atrapalham a versão antiga. O SQL de rollback (`migrations/2026-10-26_multiusuario.rollback.sql`) só é necessário para limpar o banco, e ele **apaga** usuários e histórico.
+
+## 📱 Checklist de ativação do número de produção da Meta
+
+Quando o número existir, **só mudam variáveis de ambiente**:
+
+1. No WhatsApp Manager: adicione o número à conta do WhatsApp Business, conclua a verificação da empresa e aguarde a aprovação do nome de exibição.
+2. Gere um **token permanente** (usuário do sistema no Business Manager, com `whatsapp_business_messaging` e `whatsapp_business_management`) e coloque em `WHATSAPP_TOKEN`.
+3. Copie o **ID do número** (não o número em si) para `WHATSAPP_PHONE_NUMBER_ID`.
+4. Confira `WHATSAPP_APP_SECRET` (App → Configurações → Básico) e `WHATSAPP_VERIFY_TOKEN`.
+5. **Webhook**: URL de callback `https://seu-dominio/webhook/whatsapp`, com o mesmo verify token, e assinatura do campo **`messages`**. Esse campo traz as mensagens recebidas e também os status de entrega (`sent`/`delivered`/`read`/`failed`).
+6. **Modelo de retomada**: crie e aprove no WhatsApp Manager um modelo da categoria "Utilidade", em `pt_BR` e sem variáveis (ex: "Olá! Aqui é do escritório Miguel Arcanjo Advocacia. Podemos continuar seu atendimento?"). Coloque o nome em `WHATSAPP_TEMPLATE_REENGAGE`.
+7. No `.env`: `WHATSAPP_SEND_ENABLED=true`, `WHATSAPP_SIMULATE=false`. Depois `pm2 restart bot-arcanjo --update-env`.
+8. **Teste real**:
+   - mande "oi" de um celular: o bot responde, e no painel a resposta passa de "✓ Enviada" para "✓✓ Entregue" e "✓✓ Lida";
+   - clique em **Assumir**, responda pelo painel e depois **Devolva à IA**.
+9. Se o painel mostrar:
+   - "Número não autorizado": o app ainda está em modo de teste;
+   - "Token do WhatsApp inválido": gere o token de novo;
+   - "Fora da janela de 24 h": o comportamento está correto; use o modelo de retomada.
 
 ## 🔒 Produção atrás de Nginx (e Cloudflare)
 

@@ -64,6 +64,7 @@ bot_arcanjo/
 ├── logs/                          # Logs do PM2 (out.log, error.log)
 ├── init.sql                       # Script SQL para criar tabelas no Supabase (fonte da verdade, idempotente)
 ├── migrations/                    # Blocos avulsos para colar no Supabase + rollback de cada um
+├── scripts/                       # gerar-senha.js (ADMIN_PASSWORD_HASH), simular-mensagem.js (webhook assinado)
 ├── ecosystem.config.cjs           # Configuração PM2 para produção
 ├── .env                           # Variáveis de ambiente (NÃO commitar)
 ├── .env.example                   # Template de variáveis de ambiente
@@ -264,6 +265,9 @@ npm start
 # Testes (sobem src/server.js num processo filho com Supabase falso)
 npm test
 
+# Simular um cliente escrevendo no WhatsApp (webhook assinado com WHATSAPP_APP_SECRET)
+node scripts/simular-mensagem.js 5511999999999 "Olá, fui demitido" [--nome "Maria"] [--url http://localhost:3000]
+
 # Produção com PM2
 pm2 start ecosystem.config.cjs --env production
 pm2 logs bot-arcanjo
@@ -294,6 +298,8 @@ npm run db:migrate
 ## Notas para o Claude Code
 
 - O arquivo `.env` **não está no git** — nunca sugerir commitar segredos.
+- **Deploy e número da Meta**: o README tem o checklist de deploy (SQL → deploy → login de emergência → criar usuários → `production`) e o de ativação do número de produção. Ativar o número só exige mudar variáveis de ambiente (`WHATSAPP_SEND_ENABLED=true`, token, ID do número e modelo de retomada).
+- **Regra LGPD/segurança**: a IA só classifica, resume e transcreve. Status do Kanban e responsável (de caso e de conversa) são sempre ações humanas — o teste `test/fase6-e2e.test.js` confere que nenhum `moved`/`assigned` sai sem `user_id`.
 - O `ecosystem.config.cjs` usa extensão `.cjs` propositalmente (PM2 não suporta ESM nativo no arquivo de configuração).
 - **Uma instância só** (`instances: 1`, fork): o `eventBus`/SSE e o limitador de login vivem na memória do processo.
 - **Segurança de base**: o webhook recusa (503) sem `WHATSAPP_APP_SECRET`; produção não sobe sem `SESSION_SECRET`; login limitado a 5 erros por IP+usuário e 20 por IP a cada 15 min; o id da sessão é regenerado no login. Não há `cors()` (o painel é same-origin).
