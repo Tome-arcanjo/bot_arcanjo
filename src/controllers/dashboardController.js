@@ -1,5 +1,6 @@
 import { getDb } from "../database/db.js";
-import { renderDashboardLayout } from "../views/dashboardLayout.js";
+import { renderDashboardLayout, inlineJson } from "../views/dashboardLayout.js";
+import { CRM_COLUMNS } from "../constants/crm.js";
 
 // GET /dashboard — aterrissagem padrão pós-login: manda pra Conversas.
 export function dashboardRoot(req, res) {
@@ -111,8 +112,31 @@ export async function canaisView(req, res) {
 export function crmView(req, res) {
   const content = `
     <div id="crmCallAlert" class="crm-call-alert" style="display:none;" role="alert"></div>
+    <div class="crm-toolbar">
+      <div class="crm-filters" id="crmFilters" role="group" aria-label="Filtrar casos">
+        <button type="button" class="crm-filter" data-filter="all">Todos</button>
+        <button type="button" class="crm-filter" data-filter="mine">Meus casos</button>
+        <button type="button" class="crm-filter" data-filter="unassigned">Sem responsável</button>
+      </div>
+      <span class="crm-live" id="crmLive" title="O quadro se atualiza sozinho quando alguém da equipe mexe em um caso">Conectando...</span>
+    </div>
     <div id="crmBoard" class="crm-board">
       <p class="dash-empty">Carregando casos...</p>
+    </div>
+    <div class="crm-toasts" id="crmToasts" aria-live="polite"></div>
+    <div class="crm-assign-menu" id="crmAssignMenu" role="menu" hidden></div>
+
+    <div class="modal-overlay" id="historicoOverlay">
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="historicoTitulo">
+        <div class="modal-header">
+          <h2 id="historicoTitulo">Histórico do caso</h2>
+          <button type="button" class="modal-close" id="historicoClose" aria-label="Fechar">✕</button>
+        </div>
+        <div class="modal-body">
+          <p id="historicoCliente" style="margin:0 0 12px; font-size:0.86rem; color:var(--text-secondary);"></p>
+          <ol class="crm-history" id="historicoLista"></ol>
+        </div>
+      </div>
     </div>
 
     <div class="modal-overlay" id="novoCasoOverlay">
@@ -170,7 +194,9 @@ export function crmView(req, res) {
     title: "CRM",
     content,
     topbarActions,
-    extraHead: `<link rel="stylesheet" href="/css/dashboard-crm.css" />`,
+    // Colunas vêm do servidor (src/constants/crm.js), a mesma lista que valida o status.
+    extraHead: `<link rel="stylesheet" href="/css/dashboard-crm.css" />
+  <script>window.CRM_COLUMNS = ${inlineJson(CRM_COLUMNS)};</script>`,
     hideBack: true,
     user: req.session.user,
   }));

@@ -25,7 +25,8 @@ bot_arcanjo/
 │   │   ├── chatService.js         # Lógica de negócio: sessões, mensagens, chamada de IA
 │   │   ├── whatsappService.js     # Envio de mensagens de volta ao WhatsApp
 │   │   ├── clientsService.js      # CRUD da tabela de contatos (clients)
-│   │   ├── crmService.js          # Acesso a dados de crm_cases (usado pelas rotas, pela IA e pelas ligações)
+│   │   ├── crmService.js          # Escritas em crm_cases: grava histórico + emite crmChanged (rotas, IA e ligações)
+│   │   ├── caseEventsService.js   # Histórico dos casos (case_events)
 │   │   ├── crmClassifierService.js # Classificação de casos + extração de contato via IA
 │   │   ├── settingsService.js     # Personalidade do bot (bot_settings, com cache em memória)
 │   │   ├── usersService.js        # Funcionários (users): login, CRUD, regras de papel, derrubar sessões
@@ -37,8 +38,11 @@ bot_arcanjo/
 │   ├── database/
 │   │   ├── db.js                  # Inicialização e singleton do cliente Supabase
 │   │   └── migrate.js             # npm run db:migrate (roda o init.sql via DATABASE_URL)
+│   ├── constants/
+│   │   └── crm.js                 # Colunas do Kanban (fonte única) e autores IA/Sistema
 │   ├── utils/
 │   │   ├── events.js              # eventBus (EventEmitter global) que alimenta os SSE do painel
+│   │   ├── sse.js                 # openSseStream: heartbeat, X-Accel-Buffering, fecha no userRevoked
 │   │   └── loginLimiter.js        # Limite de tentativas de login por IP+usuário e por IP (em memória)
 │   ├── views/
 │   │   └── dashboardLayout.js     # Layout compartilhado do painel (sidebar, topbar, tema)
@@ -119,6 +123,15 @@ bot_arcanjo/
 - **Regras**: e-mail único (minúsculo); senha de 8 a 72 bytes; ninguém se rebaixa nem se desativa; sempre sobra um admin ativo; só se exclui definitivamente quem não tem histórico (senão, desativar).
 - Os sids encerrados ficam bloqueados por 30 min no store, para que uma requisição que estava em andamento (ex: SSE) não "ressuscite" a sessão ao terminar.
 
+### Kanban compartilhado em tempo real
+- **Colunas**: fonte única em `src/constants/crm.js` (`CRM_COLUMNS`). O servidor valida o status e a view injeta `window.CRM_COLUMNS`. Para mudar as colunas, mude só ali.
+- **Toda escrita em `crm_cases` passa por `crmService.js`**, que recebe `actor` (`req.session.user`, `AI_ACTOR` ou `SYSTEM_ACTOR`), grava `case_events` (via `caseEventsService.recordCaseEvent`, que só registra a falha no log e nunca bloqueia) e emite `crmChanged` no `eventBus`. Não grave em `crm_cases` por fora do service, senão o quadro dos outros não atualiza.
+- O `status` e o responsável são **sempre humanos**. O classificador da IA usa `AI_ACTOR` e só cria casos ou altera urgência/área.
+- **Conflito**: vale a última gravação, e o evento leva o estado final a todos os quadros.
+- **Frontend** (`dashboard-crm.js`): o quadro só é redesenhado inteiro na carga, ao trocar o filtro e quando uma ligação passa a atrasar. Os eventos trocam só o card afetado (`upsertCase`) e ficam numa fila enquanto alguém arrasta (aplicados no `dragend`). Mudanças de outra pessoa ganham um realce dourado no card e um aviso discreto no canto (exceto etiquetas, que a IA muda o tempo todo). Ao reconectar o SSE, o quadro é recarregado. Filtros "Todos / Meus casos / Sem responsável" ficam salvos no `localStorage`.
+- O card mostra o responsável (avatar; clique para atribuir/transferir) e "movido por X · há N min" (`status_changed_by_name`/`status_changed_at`). Clicar nesse texto abre o histórico.
+- Excluir caso: o botão só aparece para admin (e a rota exige `requireAdmin`).
+
 ### Layout e frontend compartilhado
 - `renderDashboardLayout({ ..., user: req.session.user })`: **toda view do painel deve passar `user`**. Ele mostra nome e papel no rodapé da sidebar (clicando abre o modal "Minha conta" para trocar a senha), esconde os itens `adminOnly` do menu ("Configurações" e "Usuários") de quem não é admin e mostra a faixa de aviso no acesso de emergência.
 - `window.Dash` (de `public/js/dashboard-common.js`, carregado no `<head>` antes dos scripts da página): `me` (usuário logado), `escapeHtml`, `initials`, `avatarHtml(user)`, `timeAgo(iso)` e `api(url, { method, body })`, que faz fetch JSON no padrão `{ success, error }`, lança `Error(error)` e manda para `/login` em caso de 401. Use isso em telas novas em vez de duplicar helpers.
@@ -131,6 +144,11 @@ bot_arcanjo/
 - `/api/users` (admin) — `GET` lista, `POST` cria `{ name, email, password, role }`, `PATCH /:id` `{ name?, email?, role?, active? }`, `POST /:id/password` `{ password }`, `DELETE /:id` (só sem histórico)
 - `/api/settings` — Personalidade do bot (usado pela aba Configurações; salvar é só admin)
 - `/api/crm` — Casos do CRM (listar, mudar status, etiquetas, criar/excluir)
+  - `GET /api/crm/stream` — SSE do quadro (evento `crm`: `{ type, caseId, case, actor, from, to, at }`, com `type` em `created` | `moved` | `assigned` | `tags` | `call` | `deleted`)
+  - `GET /api/crm/columns` — colunas do Kanban; `GET /api/crm/users` — equipe enxuta `{ id, name, role, active }` (qualquer usuário logado)
+  - `PATCH /api/crm/cases/:id/status` `{ status }` — 400 se a coluna não existir, 404 se o caso sumiu
+  - `PATCH /api/crm/cases/:id/assign` `{ userId | null }` — atribui/transfere (só usuários ativos)
+  - `GET /api/crm/cases/:id/events` — histórico do caso (mais recente primeiro)
   - `PUT /api/crm/cases/:id/call` `{ scheduledAt }` — agenda a ligação; se já houver uma pendente, remarca e o bot avisa o cliente
   - `POST /api/crm/cases/:id/call/complete` — marca a ligação como concluída
   - `GET /api/crm/calls/overdue` — ligações pendentes atrasadas (janela de 3 h) com o intervalo de aviso atual; alimenta os alertas do navegador

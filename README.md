@@ -102,7 +102,7 @@ bot_arcanjo/
 | `/api/me` | Usuário logado; `PUT /api/me/password` troca a própria senha |
 | `/api/users` | Gestão de funcionários (somente admin) |
 | `/api/settings` | Personalidade do bot (salvar: somente admin) |
-| `/api/crm` | Casos do CRM (listar, mudar status) |
+| `/api/crm` | Casos do CRM: listar, mover, atribuir responsável, histórico e tempo real (`/api/crm/stream`) |
 | `/api/contatos` | Lista/busca de clientes |
 | `/api/conversas` | Sessões e mensagens |
 

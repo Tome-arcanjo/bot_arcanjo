@@ -2,6 +2,7 @@ import { sendToAnthropic } from "../providers/anthropic.js";
 import { sendToOpenAI } from "../providers/openai.js";
 import { getCaseByPhone, createCase, updateCaseTags } from "./crmService.js";
 import { upsertClientInfo } from "./clientsService.js";
+import { AI_ACTOR } from "../constants/crm.js";
 
 /**
  * Prompt de classificação. Importante: a IA aqui tem UMA função só —
@@ -120,7 +121,7 @@ export async function classifyAndUpdateCrmCase({ phone, userContent, provider })
       const urgency = result.urgency_tag || existingCase.urgency_tag;
       const area = result.area_tag || existingCase.area_tag;
       if (urgency !== existingCase.urgency_tag || area !== existingCase.area_tag) {
-        await updateCaseTags(existingCase.id, urgency, area);
+        await updateCaseTags(existingCase.id, urgency, area, AI_ACTOR);
         console.log(`[CRM Classifier] Caso existente (id: ${existingCase.id}) atualizado para ${phone}.`);
       }
       return;
@@ -128,13 +129,13 @@ export async function classifyAndUpdateCrmCase({ phone, userContent, provider })
 
     // Cria um caso novo — sempre começa na coluna padrão "Novo caso"
     // (definida pelo próprio banco), nunca escolhida pela IA.
-    const newCase = await createCase(phone, result.name || null, result.summary || "");
+    const newCase = await createCase(phone, result.name || null, result.summary || "", AI_ACTOR);
     if (!newCase) {
       console.error(`[CRM Classifier] createCase() retornou null para ${phone} — provável erro ao gravar no Supabase.`);
       return;
     }
     if (result.urgency_tag || result.area_tag) {
-      await updateCaseTags(newCase.id, result.urgency_tag || "Normal", result.area_tag || null);
+      await updateCaseTags(newCase.id, result.urgency_tag || "Normal", result.area_tag || null, AI_ACTOR);
     }
     console.log(`[CRM Classifier] Novo caso criado para ${phone} (id: ${newCase.id}).`);
   } catch (error) {

@@ -141,7 +141,7 @@ function requirePendingCall(crmCase) {
  * Agenda uma ligação — ou remarca, se já houver uma pendente. Na remarcação o
  * cliente é avisado pelo bot do novo horário.
  */
-export async function scheduleCall(caseId, scheduledAtInput) {
+export async function scheduleCall(caseId, scheduledAtInput, actor = null) {
   const scheduledAt = new Date(scheduledAtInput);
   if (!scheduledAtInput || Number.isNaN(scheduledAt.getTime())) {
     throw new CallError("Data e hora da ligação inválidas.");
@@ -162,7 +162,7 @@ export async function scheduleCall(caseId, scheduledAtInput) {
     call_scheduled_at: scheduledAt.toISOString(),
     call_completed_at: null,
     call_reminders_sent: 0, // recomeça a contagem de avisos de atraso
-  });
+  }, { actor, label: `${isReschedule ? "Remarcada" : "Agendada"} para ${formatDateTime(scheduledAt)}` });
   if (!updated) throw new CallError("Caso não encontrado.", 404);
 
   let clientNotified = null;
@@ -181,14 +181,14 @@ export async function scheduleCall(caseId, scheduledAtInput) {
 }
 
 /** Marca a ligação pendente como concluída (encerra os avisos de atraso). */
-export async function completeCall(caseId) {
+export async function completeCall(caseId, actor = null) {
   const existing = await loadCase(caseId);
   requirePendingCall(existing);
 
   const updated = await updateCaseCall(caseId, {
     call_status: "concluida",
     call_completed_at: new Date().toISOString(),
-  });
+  }, { actor, label: "Concluída" });
   if (!updated) throw new CallError("Caso não encontrado.", 404);
 
   console.log(`[Ligação] Caso ${caseId}: ligação concluída.`);
@@ -196,7 +196,7 @@ export async function completeCall(caseId) {
 }
 
 /** Cancela a ligação pendente e avisa o cliente pelo bot. */
-export async function cancelCall(caseId) {
+export async function cancelCall(caseId, actor = null) {
   const existing = await loadCase(caseId);
   requirePendingCall(existing);
 
@@ -205,7 +205,7 @@ export async function cancelCall(caseId) {
     call_scheduled_at: null,
     call_completed_at: null,
     call_reminders_sent: 0,
-  });
+  }, { actor, label: "Cancelada" });
   if (!updated) throw new CallError("Caso não encontrado.", 404);
 
   const clientNotified = await notifyClient(

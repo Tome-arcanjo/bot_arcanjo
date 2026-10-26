@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { getDb } from "../database/db.js";
 import { listSessions, getSessionMessages } from "../services/chatService.js";
-import eventBus from "../utils/events.js";
+import { openSseStream } from "../utils/sse.js";
 
 const router = Router();
 
@@ -51,67 +51,9 @@ router.get("/:sessionId/messages", async (req, res) => {
 });
 
 // GET /api/conversas/stream — SSE para atualizações em tempo real
+// (heartbeat, X-Accel-Buffering e fechamento ao derrubar o usuário: ver utils/sse.js)
 router.get("/stream", (req, res) => {
-  res.writeHead(200, {
-    "Content-Type": "text/event-stream",
-    "Cache-Control": "no-cache",
-    "Connection": "keep-alive",
-    // Impede que o Nginx (proxy reverso na frente do app — ver server.js)
-    // buffeie essa resposta. Sem isso, o SSE pode funcionar perfeitamente
-    // em localhost e mesmo assim não chegar em tempo real em produção,
-    // porque o Nginx segura os dados no buffer antes de repassar.
-    "X-Accel-Buffering": "no",
-  });
-
-  const sendEvent = (data) => {
-    try {
-      res.write(`data: ${JSON.stringify(data)}\n\n`);
-    } catch (e) {
-      // O cliente pode ter desconectado no exato instante em que uma
-      // mensagem foi emitida. Sem esse try/catch, uma escrita falha aqui
-      // sobe como erro não tratado e derruba o processo Node inteiro
-      // (webhook do WhatsApp incluso) — não só essa conexão SSE.
-      cleanup();
-    }
-  };
-
-  // Mantém a conexão viva atrás do Nginx (e de qualquer proxy/load balancer
-  // com timeout de conexão ociosa, tipicamente ~60s). Sem tráfego nenhum,
-  // uma conversa parada pode cair e só reconectar quando o EventSource do
-  // navegador notar — o que deixaria uma mensagem chegando durante esse
-  // intervalo sem aparecer em tempo real.
-  const heartbeat = setInterval(() => {
-    try {
-      res.write(": ping\n\n");
-    } catch (e) {
-      cleanup();
-    }
-  }, 25000);
-
-  // Usuário desativado / com papel ou senha trocados: as sessões dele já
-  // foram apagadas, mas esta conexão aberta continuaria recebendo mensagens.
-  const userId = req.session.user?.id;
-  const onUserRevoked = ({ userId: revokedId }) => {
-    if (userId && revokedId === userId) {
-      cleanup();
-      res.end();
-    }
-  };
-
-  function cleanup() {
-    clearInterval(heartbeat);
-    eventBus.off("newMessage", sendEvent);
-    eventBus.off("userRevoked", onUserRevoked);
-  }
-
-  eventBus.on("newMessage", sendEvent);
-  eventBus.on("userRevoked", onUserRevoked);
-
-  req.on("close", cleanup);
-  res.on("error", (err) => {
-    console.error("[SSE] Conexão de um cliente do painel encerrada com erro:", err.message);
-    cleanup();
-  });
+  openSseStream(req, res, [{ on: "newMessage", event: "message" }]);
 });
 
 export default router;

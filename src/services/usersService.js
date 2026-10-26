@@ -101,6 +101,17 @@ export async function listUsers() {
   return (data || []).map(publicUser);
 }
 
+/**
+ * Lista enxuta da equipe ({ id, name, role, active }) para qualquer usuário
+ * logado: seletor de responsável, avatares do Kanban e das Conversas. Inclui
+ * os desativados para os casos antigos continuarem mostrando o nome.
+ */
+export async function listTeam() {
+  const { data, error } = await getDb().from("users").select("id, name, role, active").order("name", { ascending: true });
+  if (error) throw dbFail("listar a equipe", error);
+  return (data || []).map((u) => ({ id: u.id, name: u.name, role: u.role, active: u.active }));
+}
+
 export async function getUserById(id) {
   const { data, error } = await getDb().from("users").select("*").eq("id", id).maybeSingle();
   if (error) throw dbFail("buscar o usuário", error);
