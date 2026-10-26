@@ -1,6 +1,7 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import "dotenv/config";
+import { loginRetryAfterMs, registerLoginFailure, clearLoginFailures } from "../utils/loginLimiter.js";
 
 const router = Router();
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "admin";
@@ -13,6 +14,16 @@ router.get("/login", (req, res) => {
 
 router.post("/login", async (req, res) => {
   const { username, password } = req.body || {};
+
+  const retryAfterMs = loginRetryAfterMs(req.ip, username);
+  if (retryAfterMs > 0) {
+    const minutes = Math.ceil(retryAfterMs / 60000);
+    console.warn(`[Auth] Login bloqueado temporariamente para "${username}" (IP ${req.ip}) — muitas tentativas.`);
+    res.set("Retry-After", String(Math.ceil(retryAfterMs / 1000)));
+    return res
+      .status(429)
+      .send(buildLoginHTML(`Muitas tentativas de login. Tente novamente em ${minutes} min.`));
+  }
 
   if (!ADMIN_PASSWORD_HASH) {
     console.error("[Auth] ADMIN_PASSWORD_HASH não configurado no .env — login está bloqueado.");
@@ -30,11 +41,21 @@ router.post("/login", async (req, res) => {
     (await bcrypt.compare(password, ADMIN_PASSWORD_HASH));
 
   if (validUsername && validPassword) {
-    req.session.authenticated = true;
-    return res.redirect("/dashboard");
+    clearLoginFailures(req.ip, username);
+    // Troca o id da sessão no login (evita fixação de sessão: um id plantado
+    // antes do login não passa a valer como sessão autenticada).
+    return req.session.regenerate((err) => {
+      if (err) {
+        console.error("[Auth] Erro ao criar a sessão:", err.message);
+        return res.status(500).send(buildLoginHTML("Erro ao entrar. Tente novamente."));
+      }
+      req.session.authenticated = true;
+      req.session.save(() => res.redirect("/dashboard"));
+    });
   }
 
-  console.warn(`[Auth] Tentativa de login falhou para usuário "${username}"`);
+  registerLoginFailure(req.ip, username);
+  console.warn(`[Auth] Tentativa de login falhou para usuário "${username}" (IP ${req.ip})`);
   res.send(buildLoginHTML("Usuário ou senha incorretos."));
 });
 

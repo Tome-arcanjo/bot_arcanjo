@@ -33,13 +33,19 @@ bot_arcanjo/
 │   │   ├── chatService.js           # Lógica de negócio (sessões, mensagens, IA)
 │   │   ├── whatsappService.js       # Envio de mensagens WhatsApp
 │   │   ├── clientsService.js        # CRUD da tabela de contatos (clients)
+│   │   ├── crmService.js            # Acesso a dados dos casos do CRM (crm_cases)
 │   │   ├── crmClassifierService.js  # Classificação de casos + extração de contato via IA
+│   │   ├── settingsService.js       # Personalidade do bot (bot_settings)
 │   │   └── callService.js           # Ligação com o advogado (agendar/remarcar/cancelar + avisos de atraso)
 │   ├── providers/
 │   │   ├── anthropic.js             # Wrapper Anthropic/Claude
 │   │   └── openai.js                # Wrapper OpenAI
 │   ├── database/
-│   │   └── db.js                    # Cliente Supabase (singleton)
+│   │   ├── db.js                    # Cliente Supabase (singleton)
+│   │   └── migrate.js               # npm run db:migrate (roda o init.sql)
+│   ├── utils/
+│   │   ├── events.js                # eventBus (tempo real do painel via SSE)
+│   │   └── loginLimiter.js          # Limite de tentativas de login (em memória)
 │   ├── views/
 │   │   └── dashboardLayout.js       # Layout compartilhado do painel
 │   ├── routes/
@@ -52,6 +58,7 @@ bot_arcanjo/
 │   └── middleware/
 │       └── auth.js                  # requireAuth — protege o painel
 ├── public/                          # Frontend estático do painel (CSS/JS/imagens)
+├── test/                            # Testes (npm test) — Supabase falso, sem dependências extras
 ├── init.sql                         # Script SQL para criar tabelas
 ├── ecosystem.config.cjs             # Configuração PM2
 ├── .env                             # Variáveis de ambiente (não commitar)
@@ -160,15 +167,24 @@ npm run dev
 # Produção
 npm start
 
+# Testes (sobem o servidor de verdade com um Supabase falso em memória)
+npm test
+
 # PM2 - Produção (daemon)
 pm2 start ecosystem.config.cjs --env production
 pm2 logs bot-arcanjo
 pm2 restart bot-arcanjo
 pm2 stop bot-arcanjo
 
+# PM2 - voltar sozinho depois de um reboot da VPS (rodar uma vez)
+pm2 startup        # imprime um comando "sudo env PATH=... pm2 startup ..." — copie e rode
+pm2 save           # salva a lista de processos atual; rode de novo sempre que mudar
+
 # Banco de dados
 npm run db:migrate
 ```
+
+> O app deve rodar com **uma única instância** (`instances: 1` no `ecosystem.config.cjs`): o tempo real do painel e o limite de tentativas de login ficam na memória do processo.
 
 ### Padrões de Código
 
@@ -210,6 +226,39 @@ npm run db:migrate
 
 ---
 
+## 🔒 Produção atrás de Nginx (e Cloudflare)
+
+O app confia em `TRUST_PROXY` saltos de proxy (padrão `1` = o Nginx) para saber se a conexão original era HTTPS. Se o proxy não informar HTTPS, o cookie de login com `COOKIE_SECURE=true` não é gravado e o login entra em loop. Com o padrão `COOKIE_SECURE=auto` o login funciona e o log mostra `[Server] Requisição chegou como HTTP em produção`; nesse caso corrija o proxy:
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    # Sem Cloudflare na frente: $scheme. Com Cloudflare: repasse o que ele mandou.
+    proxy_set_header X-Forwarded-Proto $scheme;
+    # proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;   # (com Cloudflare)
+    proxy_set_header Connection "";
+    proxy_buffering off;          # SSE (tempo real do painel)
+    proxy_read_timeout 1h;
+}
+```
+
+**Com Cloudflare:**
+- Use SSL/TLS em **Full (strict)**. Em "Flexible" o trecho Cloudflare → VPS é HTTP.
+- Para o limite de tentativas de login enxergar o IP real de cada pessoa (e não o do Cloudflare), ative o módulo `real_ip` no Nginx:
+  ```nginx
+  # lista atual em https://www.cloudflare.com/ips/
+  set_real_ip_from 173.245.48.0/20;
+  # ... (demais faixas do Cloudflare)
+  real_ip_header CF-Connecting-IP;
+  ```
+  Sem isso, o limite continua funcionando por IP + usuário, mas todos aparecem com o mesmo IP.
+- Depois que o log parar de avisar sobre HTTP, troque para `COOKIE_SECURE=true`.
+
+---
+
 ## 📝 Variáveis de Ambiente
 
 | Variável | Obrigatório | Padrão | Descrição |
@@ -228,6 +277,11 @@ npm run db:migrate
 | `WHATSAPP_TOKEN` | (opcional) | — | Token WhatsApp |
 | `WHATSAPP_PHONE_NUMBER_ID` | (opcional) | — | ID número WhatsApp |
 | `WHATSAPP_VERIFY_TOKEN` | (opcional) | — | Token verificação webhook |
+| `WHATSAPP_APP_SECRET` | ✅ | — | Valida a assinatura do webhook; sem ele o webhook recusa tudo (503) |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD_HASH` | ✅ | `admin` / — | Login do painel (hash gerado por `scripts/gerar-senha.js`) |
+| `SESSION_SECRET` | ✅ em produção | — | Assina o cookie de login; o servidor não sobe em produção sem ele |
+| `COOKIE_SECURE` | ❌ | `auto` | `auto`, `true` ou `false` (ver seção Nginx) |
+| `TRUST_PROXY` | ❌ | `1` | Saltos de proxy confiáveis para `X-Forwarded-*` |
 
 ---
 
@@ -242,7 +296,17 @@ npm run db:migrate
 - Confirme `ANTHROPIC_API_KEY` ou `OPENAI_API_KEY` está correto
 - Verifique se a chave tem as permissões necessárias
 
+### Login volta sempre para a tela de login (loop)
+- Procure `[Server] Requisição chegou como HTTP em produção` em `logs/out.log`
+- Corrija o `X-Forwarded-Proto` no Nginx / o SSL do Cloudflare (seção Nginx acima)
+- Enquanto isso, use `COOKIE_SECURE=auto`
+
+### "Muitas tentativas de login"
+- Após 5 senhas erradas para o mesmo usuário (ou 20 no mesmo IP) o login fica bloqueado por 15 min
+- Reiniciar o processo (`pm2 restart bot-arcanjo`) zera os contadores
+
 ### WhatsApp não recebe respostas
+- Confirme que `WHATSAPP_APP_SECRET` está configurado (sem ele o webhook responde 503)
 - Confirme `WHATSAPP_VERIFY_TOKEN` está correto
 - Teste o webhook com GET manual
 - Verifique logs em `logs/error.log`

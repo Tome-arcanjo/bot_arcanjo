@@ -7,8 +7,12 @@ module.exports = {
       script: "src/server.js",
       interpreter: "node",
       interpreter_args: "--experimental-vm-modules",
-      instances: 1,          // aumentar para "max" se quiser cluster mode
-      exec_mode: "fork",     // trocar para "cluster" para múltiplas instâncias
+      // MANTENHA 1 instância em modo fork. O tempo real do painel (SSE), o
+      // limite de tentativas de login e outros estados ficam na memória do
+      // processo; com várias instâncias cada uma teria a sua cópia e os
+      // funcionários deixariam de ver as mudanças uns dos outros.
+      instances: 1,
+      exec_mode: "fork",
       watch: false,          // NUNCA true em produção
       max_memory_restart: "512M",
 

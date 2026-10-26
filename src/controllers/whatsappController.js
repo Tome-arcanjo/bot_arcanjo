@@ -41,13 +41,6 @@ export function verifyWebhook(req, res) {
  * https://developers.facebook.com/docs/graph-api/webhooks/getting-started#validate-payloads
  */
 function isValidSignature(req) {
-  if (!APP_SECRET) {
-    // Sem app secret configurado não há como validar — apenas avisa uma vez
-    // por request. Configure WHATSAPP_APP_SECRET em produção.
-    console.warn("[WhatsApp] WHATSAPP_APP_SECRET não configurado — pulando validação de assinatura.");
-    return true;
-  }
-
   const signatureHeader = req.get("x-hub-signature-256");
   if (!signatureHeader || !req.rawBody) return false;
 
@@ -62,6 +55,13 @@ function isValidSignature(req) {
 
 // POST /webhook/whatsapp - Recebimento de mensagens
 export async function receiveMessage(req, res) {
+  // Sem app secret não há como provar que o payload veio da Meta — recusa em
+  // vez de aceitar qualquer POST de quem descobrir a URL do webhook.
+  if (!APP_SECRET) {
+    console.error("[WhatsApp] WHATSAPP_APP_SECRET não configurado — payload recusado. Configure-o no .env.");
+    return res.sendStatus(503);
+  }
+
   // Valida a origem da requisição ANTES de responder 200 e processar.
   if (!isValidSignature(req)) {
     console.warn("[WhatsApp] Assinatura inválida — payload rejeitado.");

@@ -25,13 +25,19 @@ bot_arcanjo/
 │   │   ├── chatService.js         # Lógica de negócio: sessões, mensagens, chamada de IA
 │   │   ├── whatsappService.js     # Envio de mensagens de volta ao WhatsApp
 │   │   ├── clientsService.js      # CRUD da tabela de contatos (clients)
+│   │   ├── crmService.js          # Acesso a dados de crm_cases (usado pelas rotas, pela IA e pelas ligações)
 │   │   ├── crmClassifierService.js # Classificação de casos + extração de contato via IA
+│   │   ├── settingsService.js     # Personalidade do bot (bot_settings, com cache em memória)
 │   │   └── callService.js         # Ligação com o advogado: agendar/remarcar/cancelar/concluir + avisos de atraso
 │   ├── providers/
 │   │   ├── anthropic.js           # Wrapper para Anthropic SDK (Claude)
 │   │   └── openai.js              # Wrapper para OpenAI SDK
 │   ├── database/
-│   │   └── db.js                  # Inicialização e singleton do cliente Supabase
+│   │   ├── db.js                  # Inicialização e singleton do cliente Supabase
+│   │   └── migrate.js             # npm run db:migrate (roda o init.sql via DATABASE_URL)
+│   ├── utils/
+│   │   ├── events.js              # eventBus (EventEmitter global) que alimenta os SSE do painel
+│   │   └── loginLimiter.js        # Limite de tentativas de login por IP+usuário e por IP (em memória)
 │   ├── views/
 │   │   └── dashboardLayout.js     # Layout compartilhado do painel (sidebar, topbar, tema)
 │   ├── routes/
@@ -44,6 +50,7 @@ bot_arcanjo/
 │   └── middleware/
 │       └── auth.js                # requireAuth — bloqueia o painel para quem não fez login
 ├── public/                        # Frontend estático (CSS/JS/imagens do painel)
+├── test/                          # npm test — node:test + Supabase falso (test/fakes) via loader (test/support)
 ├── data/                          # Dados locais (se houver)
 ├── logs/                          # Logs do PM2 (out.log, error.log)
 ├── init.sql                       # Script SQL para criar tabelas no Supabase
@@ -73,6 +80,11 @@ bot_arcanjo/
 | `WHATSAPP_TOKEN` | Token da API WhatsApp (Meta) | `EAAxxxxxxx` |
 | `WHATSAPP_PHONE_NUMBER_ID` | ID do número WhatsApp | `12345678` |
 | `WHATSAPP_VERIFY_TOKEN` | Token de verificação do webhook | `meu_token_secreto` |
+| `WHATSAPP_APP_SECRET` | OBRIGATÓRIO: valida a assinatura `X-Hub-Signature-256`. Sem ele o webhook responde 503 a tudo | `abc123...` |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD_HASH` | Login do painel (hash bcrypt de `scripts/gerar-senha.js`) | `admin` / `$2a$12$...` |
+| `SESSION_SECRET` | Assina o cookie de login. OBRIGATÓRIO em produção (o servidor não sobe sem ele) | `openssl rand -hex 32` |
+| `COOKIE_SECURE` | `auto` (padrão: Secure só se o proxy informar HTTPS), `true` ou `false` | `auto` |
+| `TRUST_PROXY` | Saltos de proxy confiáveis para `X-Forwarded-*` (padrão `1` = Nginx) | `1` |
 | `CALL_ALERT_PHONES` | OPCIONAL: números (DDI, só dígitos, vírgula) que também recebem o aviso de "ligação atrasada" no WhatsApp. Vazio = só aviso no navegador | `5511999999999,5511888888888` |
 | `APP_TIMEZONE` | Fuso dos horários nas mensagens de ligação (padrão `America/Sao_Paulo`) | `America/Sao_Paulo` |
 
@@ -175,10 +187,17 @@ npm run dev
 # Produção
 npm start
 
+# Testes (sobem src/server.js num processo filho com Supabase falso)
+npm test
+
 # Produção com PM2
 pm2 start ecosystem.config.cjs --env production
 pm2 logs bot-arcanjo
 pm2 restart bot-arcanjo
+
+# PM2 sobrevivendo a reboot da VPS (uma vez; "pm2 save" de novo a cada mudança na lista de processos)
+pm2 startup   # copie e rode o comando sudo que ele imprimir
+pm2 save
 
 # Banco de dados
 npm run db:migrate
@@ -202,6 +221,10 @@ npm run db:migrate
 
 - O arquivo `.env` **não está no git** — nunca sugerir commitar segredos.
 - O `ecosystem.config.cjs` usa extensão `.cjs` propositalmente (PM2 não suporta ESM nativo no arquivo de configuração).
+- **Uma instância só** (`instances: 1`, fork): o `eventBus`/SSE e o limitador de login vivem na memória do processo.
+- **Segurança de base**: o webhook recusa (503) sem `WHATSAPP_APP_SECRET`; produção não sobe sem `SESSION_SECRET`; login limitado a 5 erros por IP+usuário e 20 por IP a cada 15 min; o id da sessão é regenerado no login. Não há `cors()` (o painel é same-origin).
+- **Proxy**: atrás de Nginx (e Cloudflare), o `X-Forwarded-Proto` decide se o cookie é `Secure`. O log `[Server] Requisição chegou como HTTP em produção` indica proxy mal configurado (ver README, seção Nginx).
+- **Testes**: `test/support/loader.mjs` troca `@supabase/supabase-js` por `test/fakes/supabase.js` (banco em um JSON temporário). O fake não valida colunas/CHECKs — SQL novo precisa ser conferido num Postgres de verdade.
 - A pasta `logs/` é criada automaticamente pelo PM2; não precisa ser commitada.
 - O frontend estático fica em `public/` — qualquer arquivo lá é servido diretamente pelo Express.
 - Supabase é o único banco — não há SQLite ou banco local.
