@@ -1,9 +1,30 @@
 import { Router } from "express";
 import { getDb } from "../database/db.js";
-import { listSessions, getSessionMessages } from "../services/chatService.js";
-import eventBus from "../utils/events.js";
+import { listSessions, getSessionMessages, getSessionById } from "../services/chatService.js";
+import { getWindowState, retryMessage } from "../services/outboundService.js";
+import {
+  assumeSession,
+  releaseSession,
+  sendHumanMessage,
+  sendTemplateMessage,
+  touchPresence,
+  leavePresence,
+  getViewers,
+} from "../services/handoverService.js";
+import { SEND_ENABLED, SIMULATE } from "../services/whatsappService.js";
+import { openSseStream } from "../utils/sse.js";
 
 const router = Router();
+
+// Erros de regra (HandoverError / outboundService) trazem status e, às vezes,
+// um código que o painel trata (HANDLED_BY_OTHER, WINDOW_CLOSED).
+function sendError(res, error) {
+  const body = { success: false, error: error.message };
+  if (error.code) body.code = error.code;
+  if (error.handler) body.handler = error.handler;
+  if (error.window) body.window = error.window;
+  res.status(error.status || 500).json(body);
+}
 
 // GET /api/conversas — lista as conversas (sessões) com uma prévia da
 // última mensagem, pra montar a caixa de entrada.
@@ -40,6 +61,31 @@ router.get("/", async (req, res) => {
   }
 });
 
+// GET /api/conversas/stream — SSE para atualizações em tempo real
+// (heartbeat, X-Accel-Buffering e fechamento ao derrubar o usuário: ver utils/sse.js)
+//  - mensagem sem nome ("message"): { message, session } — mensagem nova
+//  - "status":   { messageId, sessionId, status, error } — entrega pelo WhatsApp
+//  - "session":  { session, actor } — IA pausada/retomada, quem está atendendo
+//  - "presence": { sessionId, viewers } — quem está com a conversa aberta
+router.get("/stream", (req, res) => {
+  openSseStream(req, res, [
+    { on: "newMessage", event: "message" },
+    { on: "messageStatus", event: "status" },
+    { on: "sessionUpdated", event: "session" },
+    { on: "presence", event: "presence" },
+  ]);
+});
+
+// POST /api/conversas/messages/:messageId/retry — reenvia uma mensagem que falhou
+router.post("/messages/:messageId/retry", async (req, res) => {
+  try {
+    const { message, ok } = await retryMessage(req.params.messageId);
+    res.json({ success: true, data: message, delivered: ok });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
 // GET /api/conversas/:sessionId/messages — thread completa de uma conversa.
 router.get("/:sessionId/messages", async (req, res) => {
   try {
@@ -50,56 +96,79 @@ router.get("/:sessionId/messages", async (req, res) => {
   }
 });
 
-// GET /api/conversas/stream — SSE para atualizações em tempo real
-router.get("/stream", (req, res) => {
-  res.writeHead(200, {
-    "Content-Type": "text/event-stream",
-    "Cache-Control": "no-cache",
-    "Connection": "keep-alive",
-    // Impede que o Nginx (proxy reverso na frente do app — ver server.js)
-    // buffeie essa resposta. Sem isso, o SSE pode funcionar perfeitamente
-    // em localhost e mesmo assim não chegar em tempo real em produção,
-    // porque o Nginx segura os dados no buffer antes de repassar.
-    "X-Accel-Buffering": "no",
-  });
-
-  const sendEvent = (data) => {
-    try {
-      res.write(`data: ${JSON.stringify(data)}\n\n`);
-    } catch (e) {
-      // O cliente pode ter desconectado no exato instante em que uma
-      // mensagem foi emitida. Sem esse try/catch, uma escrita falha aqui
-      // sobe como erro não tratado e derruba o processo Node inteiro
-      // (webhook do WhatsApp incluso) — não só essa conexão SSE.
-      cleanup();
-    }
-  };
-
-  // Mantém a conexão viva atrás do Nginx (e de qualquer proxy/load balancer
-  // com timeout de conexão ociosa, tipicamente ~60s). Sem tráfego nenhum,
-  // uma conversa parada pode cair e só reconectar quando o EventSource do
-  // navegador notar — o que deixaria uma mensagem chegando durante esse
-  // intervalo sem aparecer em tempo real.
-  const heartbeat = setInterval(() => {
-    try {
-      res.write(": ping\n\n");
-    } catch (e) {
-      cleanup();
-    }
-  }, 25000);
-
-  function cleanup() {
-    clearInterval(heartbeat);
-    eventBus.off("newMessage", sendEvent);
+// GET /api/conversas/:sessionId/state — quem atende, janela de 24 h, quem está vendo
+router.get("/:sessionId/state", async (req, res) => {
+  try {
+    const session = await getSessionById(req.params.sessionId);
+    if (!session) return res.status(404).json({ success: false, error: "Conversa não encontrada." });
+    res.json({
+      success: true,
+      data: {
+        session,
+        window: await getWindowState(session.id),
+        viewers: getViewers(session.id),
+        sending: SEND_ENABLED ? "on" : SIMULATE ? "simulated" : "off",
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
   }
+});
 
-  eventBus.on("newMessage", sendEvent);
+// POST /api/conversas/:sessionId/messages { content, force? } — funcionário responde.
+// Pausa a IA automaticamente. 409 HANDLED_BY_OTHER se outra pessoa está
+// atendendo (reenviar com force: true para responder mesmo assim) e 409
+// WINDOW_CLOSED fora da janela de 24 h.
+router.post("/:sessionId/messages", async (req, res) => {
+  const { content, force } = req.body || {};
+  try {
+    const { message, ok } = await sendHumanMessage(req.params.sessionId, req.session.user, content, { force: force === true });
+    res.json({ success: true, data: message, delivered: ok });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
 
-  req.on("close", cleanup);
-  res.on("error", (err) => {
-    console.error("[SSE] Conexão de um cliente do painel encerrada com erro:", err.message);
-    cleanup();
-  });
+// POST /api/conversas/:sessionId/template — envia o modelo de retomada (fora das 24 h)
+router.post("/:sessionId/template", async (req, res) => {
+  try {
+    const { message, ok } = await sendTemplateMessage(req.params.sessionId, req.session.user, {
+      force: (req.body || {}).force === true,
+    });
+    res.json({ success: true, data: message, delivered: ok });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+// POST /api/conversas/:sessionId/assume { force? } — assume a conversa (pausa a IA)
+router.post("/:sessionId/assume", async (req, res) => {
+  try {
+    const session = await assumeSession(req.params.sessionId, req.session.user, { force: (req.body || {}).force === true });
+    res.json({ success: true, data: session });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+// POST /api/conversas/:sessionId/release — devolve a conversa à IA
+router.post("/:sessionId/release", async (req, res) => {
+  try {
+    const session = await releaseSession(req.params.sessionId, req.session.user);
+    res.json({ success: true, data: session });
+  } catch (error) {
+    sendError(res, error);
+  }
+});
+
+// POST /api/conversas/:sessionId/presence { leave? } — "estou com esta conversa aberta"
+// (o painel renova a cada 20 s; some sozinho depois de 45 s sem renovar)
+router.post("/:sessionId/presence", (req, res) => {
+  if ((req.body || {}).leave === true) {
+    leavePresence(req.params.sessionId, req.session.user);
+    return res.json({ success: true, data: getViewers(req.params.sessionId) });
+  }
+  res.json({ success: true, data: touchPresence(req.params.sessionId, req.session.user) });
 });
 
 export default router;

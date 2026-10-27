@@ -9,6 +9,7 @@ import eventBus from "../utils/events.js";
 import "dotenv/config";
 
 const DEFAULT_PROVIDER = process.env.AI_PROVIDER || "openai";
+const HISTORY_LIMIT = 10; // mensagens de contexto enviadas para a IA
 
 /**
  * Envia mensagem para o provedor de IA escolhido
@@ -82,7 +83,13 @@ export async function getOrCreateSessionByPhone(phone, provider = DEFAULT_PROVID
 
   if (insertError) throw new Error(insertError.message);
 
-  return { id, title: `WhatsApp: ${phone}`, provider, model, phone };
+  return { id, title: `WhatsApp: ${phone}`, provider, model, phone, ai_paused: false, handler_user_id: null };
+}
+
+export async function getSessionById(sessionId) {
+  const { data, error } = await getDb().from("sessions").select("*").eq("id", sessionId).maybeSingle();
+  if (error) throw new Error(error.message);
+  return data;
 }
 
 /**
@@ -124,100 +131,104 @@ export async function getSessionMessages(sessionId) {
 }
 
 /**
- * Registra no histórico da conversa uma mensagem que o bot enviou por conta
- * própria (avisos de ligação remarcada/cancelada) — sem passar pela IA. Assim
- * ela aparece na aba Conversas e entra no contexto das próximas respostas.
+ * Salva uma mensagem recebida do cliente, avisa o painel (SSE) e dispara a
+ * classificação do CRM. Vale com a IA ativa ou pausada (atendimento humano):
+ * a mensagem do cliente sempre fica registrada e o caso continua sendo
+ * classificado.
+ *
+ * @param {Object} session - linha de sessions
+ * @param {string} content
+ * @param {{ classify?: boolean }} [opts] - classify: false para avisos como "[o cliente enviou uma imagem]"
  */
-export async function recordAssistantMessage(phone, content) {
+export async function saveIncomingMessage(session, content, { classify = true } = {}) {
   const db = getDb();
-  const session = await getOrCreateSessionByPhone(phone);
-
-  const id = uuidv4();
-  const { error } = await db.from("messages").insert({
-    id,
+  const message = {
+    id: uuidv4(),
     session_id: session.id,
-    role: "assistant",
+    role: "user",
     content,
-  });
+    created_at: new Date().toISOString(),
+  };
+  const { error } = await db.from("messages").insert(message);
   if (error) throw new Error(error.message);
 
-  await db.from("sessions").update({ updated_at: new Date().toISOString() }).eq("id", session.id);
-
-  eventBus.emit("newMessage", {
-    message: { id, session_id: session.id, role: "assistant", content, created_at: new Date().toISOString() },
-    session,
-  });
-}
-
-/**
- * Processa uma mensagem do usuario e retorna a resposta da IA
- */
-export async function processMessage(sessionId, userContent, provider, systemPrompt) {
-  const db = getDb();
-
-  // Verifica se a sessao existe
-  const { data: sessions, error: sessionError } = await db
-    .from("sessions")
-    .select("*")
-    .eq("id", sessionId)
-    .limit(1);
-
-  if (sessionError) throw new Error(sessionError.message);
-  if (!sessions || sessions.length === 0) throw new Error("Sessao nao encontrada");
-
-  const session = sessions[0];
-  const usedProvider = provider || session.provider;
-
-  // Salva mensagem do usuario
-  const userMessageId = uuidv4();
-  const { error: insertUserError } = await db.from("messages").insert({
-    id: userMessageId,
-    session_id: sessionId,
-    role: "user",
-    content: userContent,
-  });
-  if (insertUserError) throw new Error(insertUserError.message);
-
   // Emite evento para o SSE (painel em tempo real)
-  eventBus.emit("newMessage", {
-    message: {
-      id: userMessageId,
-      session_id: sessionId,
-      role: "user",
-      content: userContent,
-      created_at: new Date().toISOString(),
-    },
-    session
-  });
+  eventBus.emit("newMessage", { message, session });
 
   // --- CLASSIFICAÇÃO AUTOMÁTICA DO CRM ---
   // Roda em segundo plano (sem "await") para não atrasar a resposta ao
   // cliente. A IA aqui só classifica (resumo/urgência/área) — nunca move
   // o caso no Kanban nem toma decisões; isso continua manual. Só se aplica
   // a conversas de WhatsApp (sessões com telefone associado).
-  if (session.phone) {
+  if (classify && session.phone) {
     classifyAndUpdateCrmCase({
       phone: session.phone,
-      userContent,
-      provider: usedProvider,
+      userContent: content,
+      provider: session.provider || DEFAULT_PROVIDER,
     }).catch((e) => console.error("[CRM Classifier]", e.message));
   }
   // ----------------------------------------
 
-  // Busca historico de mensagens para contexto (max 10)
+  // A primeira mensagem do cliente vira o título da conversa.
+  const { count, error: countError } = await db
+    .from("messages")
+    .select("id", { count: "exact", head: true })
+    .eq("session_id", session.id)
+    .eq("role", "user");
+
+  const update = { updated_at: new Date().toISOString() };
+  if (!countError && count <= 1) {
+    update.title = content.substring(0, 50) + (content.length > 50 ? "..." : "");
+  }
+  await db.from("sessions").update(update).eq("id", session.id);
+
+  return message;
+}
+
+/**
+ * Converte o histórico salvo para o formato que as APIs de IA aceitam:
+ *  - mensagens de funcionários ("human") viram "assistant" — para o modelo
+ *    é tudo "o escritório falando";
+ *  - mensagens que não chegaram ao cliente (delivery_status "failed") ficam
+ *    de fora, senão a IA acharia que o cliente leu algo que nunca recebeu;
+ *  - turnos seguidos do mesmo papel são unidos e o histórico sempre começa
+ *    pelo cliente (exigências das APIs de chat).
+ * Função pura. `rows` em ordem cronológica.
+ */
+export function toAiHistory(rows) {
+  const turns = [];
+  for (const m of rows || []) {
+    if (m.delivery_status === "failed") continue;
+    const role = m.role === "human" ? "assistant" : m.role;
+    if (role !== "user" && role !== "assistant") continue;
+    const last = turns[turns.length - 1];
+    if (last && last.role === role) last.content += `\n\n${m.content}`;
+    else turns.push({ role, content: m.content });
+  }
+  while (turns.length && turns[0].role !== "user") turns.shift();
+  return turns;
+}
+
+/**
+ * Gera (sem salvar nem enviar) a resposta da IA para a conversa, usando as
+ * últimas mensagens como contexto. Quem envia é o outboundService.
+ */
+export async function generateAiReply(session, systemPrompt) {
+  const db = getDb();
   const { data: history, error: historyError } = await db
     .from("messages")
-    .select("role, content")
-    .eq("session_id", sessionId)
+    .select("role, content, delivery_status, created_at")
+    .eq("session_id", session.id)
     .order("created_at", { ascending: false })
-    .limit(10);
+    .limit(HISTORY_LIMIT);
 
   if (historyError) throw new Error(historyError.message);
 
   // Inverte para ordem cronologica antes de enviar para IA
-  const historyOrdered = (history || []).reverse();
+  const messages = toAiHistory((history || []).reverse());
+  const usedProvider = session.provider || DEFAULT_PROVIDER;
 
-    // --- INJEÇÃO DO CRM ---
+  // --- INJEÇÃO DO CRM ---
   // Importante: se nenhum systemPrompt explícito foi passado (é o caso do
   // WhatsApp, que sempre usa a personalidade configurada no admin), cai
   // aqui para a personalidade compartilhada ANTES de qualquer concatenação
@@ -246,55 +257,6 @@ export async function processMessage(sessionId, userContent, provider, systemPro
   }
   // ----------------------
 
-  // Chama a IA
-  console.log(`[AI] Chamando ${usedProvider} com ${historyOrdered.length} msgs de contexto`);
-  const assistantContent = await callAIProvider(historyOrdered, usedProvider, finalSystemPrompt);
-
-  // Salva resposta da IA
-  const assistantMessageId = uuidv4();
-  const { error: insertAssistantError } = await db.from("messages").insert({
-    id: assistantMessageId,
-    session_id: sessionId,
-    role: "assistant",
-    content: assistantContent,
-  });
-  if (insertAssistantError) throw new Error(insertAssistantError.message);
-
-  // Emite evento para o SSE (painel em tempo real)
-  eventBus.emit("newMessage", {
-    message: {
-      id: assistantMessageId,
-      session_id: sessionId,
-      role: "assistant",
-      content: assistantContent,
-      created_at: new Date().toISOString(),
-    },
-    session
-  });
-
-  // Conta mensagens para decidir se atualiza o titulo
-  const { count, error: countError } = await db
-    .from("messages")
-    .select("id", { count: "exact", head: true })
-    .eq("session_id", sessionId);
-
-  if (!countError) {
-    const title =
-      count <= 2
-        ? userContent.substring(0, 50) + (userContent.length > 50 ? "..." : "")
-        : session.title;
-
-    await db
-      .from("sessions")
-      .update({ title, updated_at: new Date().toISOString() })
-      .eq("id", sessionId);
-  }
-
-  return {
-    id: assistantMessageId,
-    role: "assistant",
-    content: assistantContent,
-    provider: usedProvider,
-  };
+  console.log(`[AI] Chamando ${usedProvider} com ${messages.length} msgs de contexto`);
+  return await callAIProvider(messages, usedProvider, finalSystemPrompt);
 }
-

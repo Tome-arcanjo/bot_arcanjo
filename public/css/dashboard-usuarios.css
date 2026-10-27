@@ -1,0 +1,31 @@
+/* ── Tela de Usuários ── */
+.usuarios-table td { vertical-align: middle; }
+
+.usuario-nome {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 500;
+}
+
+.usuario-voce {
+  color: var(--text-muted);
+  font-weight: 400;
+  font-size: 0.78rem;
+}
+
+.usuario-data {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.usuario-acoes {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.usuarios-table tr.is-inactive td { color: var(--text-muted); }
+.usuarios-table tr.is-inactive .avatar { opacity: 0.5; }

@@ -1,7 +1,8 @@
 import "dotenv/config";
 import { getCaseById, updateCaseCall, getOverdueCalls, claimCallReminder } from "./crmService.js";
 import { sendWhatsAppMessage } from "./whatsappService.js";
-import { recordAssistantMessage } from "./chatService.js";
+import { getOrCreateSessionByPhone } from "./chatService.js";
+import { deliverMessage } from "./outboundService.js";
 
 /**
  * Ligação do cliente com o advogado.
@@ -96,31 +97,26 @@ export function computeDueReminder(scheduledAtMs, remindersSent, nowMs) {
 }
 
 /**
- * Envia uma mensagem do bot ao cliente e registra no histórico da conversa.
- * Retorna true se o WhatsApp aceitou a mensagem.
+ * Envia uma mensagem do bot ao cliente, registrada na conversa (aba Conversas)
+ * com o status da entrega. Retorna true se o WhatsApp aceitou a mensagem.
  *
  * Atenção: a API da Meta só aceita texto livre dentro de 24h da última mensagem
- * do cliente. Fora dessa janela o envio falha (é logado e o painel avisa o admin).
+ * do cliente. Fora dessa janela o envio nem é tentado: a mensagem fica na
+ * conversa como "não enviada" e o painel avisa o admin.
  */
 async function notifyClient(phone, text) {
   const to = String(phone || "").replace(/\D/g, "");
   if (!to) return false;
 
   try {
-    const sent = await sendWhatsAppMessage(to, text);
-    if (!sent) return false; // WhatsApp não configurado (o service já logou o aviso)
+    const session = await getOrCreateSessionByPhone(to);
+    const { ok, message } = await deliverMessage({ session, content: text, role: "assistant" });
+    if (!ok) console.error(`[Ligação] Não foi possível avisar o cliente ${to}: ${message.delivery_error}`);
+    return ok;
   } catch (error) {
     console.error(`[Ligação] Não foi possível avisar o cliente ${to}:`, error.message);
     return false;
   }
-
-  try {
-    await recordAssistantMessage(to, text);
-  } catch (error) {
-    // A mensagem já chegou ao cliente; só o registro no painel falhou.
-    console.error(`[Ligação] Aviso enviado a ${to}, mas não foi possível registrar no histórico:`, error.message);
-  }
-  return true;
 }
 
 // ── Ações do admin ──────────────────────────────────────────────────────
@@ -141,7 +137,7 @@ function requirePendingCall(crmCase) {
  * Agenda uma ligação — ou remarca, se já houver uma pendente. Na remarcação o
  * cliente é avisado pelo bot do novo horário.
  */
-export async function scheduleCall(caseId, scheduledAtInput) {
+export async function scheduleCall(caseId, scheduledAtInput, actor = null) {
   const scheduledAt = new Date(scheduledAtInput);
   if (!scheduledAtInput || Number.isNaN(scheduledAt.getTime())) {
     throw new CallError("Data e hora da ligação inválidas.");
@@ -162,7 +158,7 @@ export async function scheduleCall(caseId, scheduledAtInput) {
     call_scheduled_at: scheduledAt.toISOString(),
     call_completed_at: null,
     call_reminders_sent: 0, // recomeça a contagem de avisos de atraso
-  });
+  }, { actor, label: `${isReschedule ? "Remarcada" : "Agendada"} para ${formatDateTime(scheduledAt)}` });
   if (!updated) throw new CallError("Caso não encontrado.", 404);
 
   let clientNotified = null;
@@ -181,14 +177,14 @@ export async function scheduleCall(caseId, scheduledAtInput) {
 }
 
 /** Marca a ligação pendente como concluída (encerra os avisos de atraso). */
-export async function completeCall(caseId) {
+export async function completeCall(caseId, actor = null) {
   const existing = await loadCase(caseId);
   requirePendingCall(existing);
 
   const updated = await updateCaseCall(caseId, {
     call_status: "concluida",
     call_completed_at: new Date().toISOString(),
-  });
+  }, { actor, label: "Concluída" });
   if (!updated) throw new CallError("Caso não encontrado.", 404);
 
   console.log(`[Ligação] Caso ${caseId}: ligação concluída.`);
@@ -196,7 +192,7 @@ export async function completeCall(caseId) {
 }
 
 /** Cancela a ligação pendente e avisa o cliente pelo bot. */
-export async function cancelCall(caseId) {
+export async function cancelCall(caseId, actor = null) {
   const existing = await loadCase(caseId);
   requirePendingCall(existing);
 
@@ -205,7 +201,7 @@ export async function cancelCall(caseId) {
     call_scheduled_at: null,
     call_completed_at: null,
     call_reminders_sent: 0,
-  });
+  }, { actor, label: "Cancelada" });
   if (!updated) throw new CallError("Caso não encontrado.", 404);
 
   const clientNotified = await notifyClient(
@@ -240,10 +236,11 @@ async function sendOverdueAlert(crmCase, { newSent, overdueMs }) {
     return;
   }
 
-  const results = await Promise.allSettled(phones.map((to) => sendWhatsAppMessage(to, text)));
+  // sendWhatsAppMessage nunca lança: devolve { ok, error }.
+  const results = await Promise.all(phones.map((to) => sendWhatsAppMessage(to, text)));
   results.forEach((r, i) => {
-    if (r.status === "rejected") {
-      console.error(`[Ligação] Falha ao avisar ${phones[i]} sobre o atraso do caso ${crmCase.id}:`, r.reason?.message);
+    if (!r.ok) {
+      console.error(`[Ligação] Falha ao avisar ${phones[i]} sobre o atraso do caso ${crmCase.id}: ${r.error}`);
     }
   });
   console.log(`[Ligação] Aviso ${newSent}/${MAX_REMINDERS} de atraso do caso ${crmCase.id} enviado a ${phones.length} número(s).`);
