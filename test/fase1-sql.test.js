@@ -17,6 +17,10 @@ const LEGACY_INIT = read("test/sql/legacy-init.sql");
 const INIT = read("init.sql");
 const MIGRATION = read("migrations/2026-10-26_multiusuario.sql");
 const ROLLBACK = read("migrations/2026-10-26_multiusuario.rollback.sql");
+const ATENDIMENTO = read("migrations/2026-11-04_quadro_atendimento.sql");
+const ATENDIMENTO_ROLLBACK = read("migrations/2026-11-04_quadro_atendimento.rollback.sql");
+const CONVERSAS = read("migrations/2026-11-10_conversas_whatsapp.sql");
+const CONVERSAS_ROLLBACK = read("migrations/2026-11-10_conversas_whatsapp.rollback.sql");
 
 const skip = process.env.PG_TEST_URL ? false : "PG_TEST_URL não definido";
 const schema = `arcanjo_test_${process.pid}`;
@@ -60,11 +64,26 @@ test("migração sobre um banco antigo, com dados, rodando init.sql duas vezes",
   await client.query(INIT);
   await client.query(INIT); // idempotente
   await client.query(MIGRATION); // o arquivo avulso também
+  await client.query(ATENDIMENTO);
+  await client.query(CONVERSAS);
 
   const { rows: legacy } = await client.query("SELECT count(*)::int AS n FROM messages");
   assert.equal(legacy[0].n, 2, "nenhum dado existente foi apagado");
   const { rows: s } = await client.query("SELECT ai_paused FROM sessions WHERE id = 's1'");
   assert.equal(s[0].ai_paused, false, "conversas existentes começam com a IA ativa");
+  const { rows: stage } = await client.query("SELECT board_stage, contact_name FROM sessions WHERE id = 's1'");
+  assert.deepEqual(stage[0], { board_stage: "Aguardando atendimento", contact_name: null }, "conversas existentes começam na 1ª coluna do Atendimento");
+  for (const col of ["contact_name", "board_stage", "board_stage_changed_by", "board_stage_changed_by_name", "board_stage_changed_at", "queue_since"]) {
+    assert.ok((await columns("sessions")).includes(col), col);
+  }
+  for (const col of ["message_type", "media", "reply_to_id", "reactions", "forwarded", "edited_at", "deleted_at", "deleted_by_name"]) {
+    assert.ok((await columns("messages")).includes(col), col);
+  }
+  assert.ok((await columns("clients")).includes("tags"));
+  const { rows: q } = await client.query("SELECT queue_since IS NOT NULL AS queued FROM sessions WHERE id = s1");
+  assert.equal(q[0].queued, true, "conversa antiga só com a IA entra na fila");
+  const { rows: types } = await client.query("SELECT DISTINCT message_type FROM messages");
+  assert.deepEqual(types.map((r) => r.message_type), ["text"], "mensagens antigas viram texto");
 
   assert.deepEqual(
     (await columns("users")).sort(),
@@ -114,6 +133,10 @@ test("regras do schema novo", { skip }, async () => {
       /check/i
     );
 
+    await rejects("INSERT INTO messages (id, session_id, role, content, message_type) VALUES ('m6', 's1', 'user', 'x', 'gif')", [], /check/i);
+    await client.query(`INSERT INTO messages (id, session_id, role, content, message_type, media, reply_to_id)
+      VALUES ('m7', 's1', 'human', '[Imagem]', 'image', '{"path": "2026-11/a.jpg", "mime": "image/jpeg"}', 'm3')`);
+
     await rejects("INSERT INTO case_events (id, case_id, type) VALUES ('e0', 'c1', 'arquivado')", [], /check/i);
     await client.query("INSERT INTO case_events (id, case_id, user_id, actor_name, type, from_value, to_value) VALUES ('e1', 'c1', 'u1', 'Ana', 'moved', 'Novo caso', 'Em análise')");
     await client.query("INSERT INTO case_events (id, case_id, actor_name, type) VALUES ('e2', 'caso-que-nao-existe', 'Ana', 'deleted')");
@@ -141,6 +164,13 @@ test("regras do schema novo", { skip }, async () => {
 
 test("rollback desfaz tudo sem perder mensagens humanas, e a migração pode rodar de novo", { skip }, async () => {
   await client.query("INSERT INTO messages (id, session_id, role, content) VALUES ('m9', 's1', 'human', 'mensagem da equipe')");
+  // Do mais novo para o mais antigo: sessions.board_stage_changed_by aponta para users.
+  await client.query(CONVERSAS_ROLLBACK);
+  assert.ok(!(await columns("messages")).includes("reactions"));
+  assert.ok(!(await columns("clients")).includes("tags"));
+  await client.query(ATENDIMENTO_ROLLBACK);
+  assert.ok(!(await columns("sessions")).includes("board_stage"));
+  assert.ok(!(await columns("sessions")).includes("contact_name"));
   await client.query(ROLLBACK);
 
   const { rows } = await client.query("SELECT role, content FROM messages WHERE id = 'm9'");

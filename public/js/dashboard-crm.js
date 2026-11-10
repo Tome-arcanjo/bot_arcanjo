@@ -134,9 +134,7 @@
       callAlert.style.display = "none";
       return;
     }
-    callAlert.textContent = late === 1
-      ? "⚠ 1 ligação está atrasada."
-      : "⚠ " + late + " ligações estão atrasadas.";
+    callAlert.innerHTML = window.Dash.icon("alert") + " " + (late === 1 ? "1 ligação está atrasada." : late + " ligações estão atrasadas.");
     callAlert.style.display = "block";
   }
 
@@ -305,7 +303,7 @@
     card.dataset.id = c.id;
     card.title = "Ver conversa com esse cliente";
     card.innerHTML = `
-      ${isAdmin ? `<button type="button" class="crm-card-delete" draggable="false" title="Excluir caso">✕</button>` : ""}
+      ${isAdmin ? `<button type="button" class="crm-card-delete" draggable="false" title="Excluir caso">${window.Dash.icon("x")}</button>` : ""}
       <div class="crm-card-title">${escapeHtml(c.client_name || "Sem nome")}</div>
       <div class="crm-card-phone">${escapeHtml(c.phone)}</div>
       ${c.summary ? `<div class="crm-card-summary">${escapeHtml(c.summary)}</div>` : ""}

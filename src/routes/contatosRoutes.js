@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { listClients } from "../services/clientsService.js";
+import { listClients, setClientTags } from "../services/clientsService.js";
 
 const router = Router();
 
@@ -11,6 +11,17 @@ router.get("/", async (req, res) => {
     res.json({ success: true, data: clients });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// PUT /api/contatos/:phone/tags { tags: [ids] } — etiquetas jurídicas do cliente
+// (ids de src/constants/tags.js; 400 se algum não existir). Todos veem pelo SSE.
+router.put("/:phone/tags", async (req, res) => {
+  try {
+    const client = await setClientTags(req.params.phone, (req.body || {}).tags, req.session.user);
+    res.json({ success: true, data: client });
+  } catch (error) {
+    res.status(error.status || 500).json({ success: false, error: error.message });
   }
 });
 

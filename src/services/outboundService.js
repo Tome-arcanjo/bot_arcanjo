@@ -1,7 +1,15 @@
 import { v4 as uuidv4 } from "uuid";
 import { getDb } from "../database/db.js";
 import eventBus from "../utils/events.js";
-import { sendWhatsAppMessage, sendWhatsAppTemplate, REENGAGE_TEMPLATE, REENGAGE_TEMPLATE_LANG } from "./whatsappService.js";
+import {
+  sendWhatsAppMessage,
+  sendWhatsAppTemplate,
+  sendWhatsAppMedia,
+  uploadWhatsAppMedia,
+  REENGAGE_TEMPLATE,
+  REENGAGE_TEMPLATE_LANG,
+} from "./whatsappService.js";
+import { readMedia } from "./mediaService.js";
 
 /**
  * Caminho ÚNICO de saída de mensagens para o cliente: resposta da IA,
@@ -65,10 +73,44 @@ async function saveResult(message, result) {
   const fields = result.ok
     ? { delivery_status: "sent", delivery_error: null, wa_message_id: result.waMessageId || null }
     : { delivery_status: "failed", delivery_error: result.error || "Falha no envio." };
+  // O id do anexo na Meta (upload) é guardado para o reenvio não carregar de novo.
+  if (message.media) fields.media = message.media;
   const { error } = await getDb().from("messages").update(fields).eq("id", message.id);
   if (error) console.error(`[Envio] Não foi possível gravar o status da mensagem ${message.id}:`, error.message);
   Object.assign(message, fields);
   emitStatus(message);
+}
+
+const isTemplateMessage = (m) => m.message_type === "template" || String(m.content).startsWith("[Modelo de mensagem: ");
+
+/** wa_message_id da mensagem citada (para o "context" da resposta). */
+async function replyWaId(message) {
+  if (!message.reply_to_id) return null;
+  const { data } = await getDb().from("messages").select("wa_message_id").eq("id", message.reply_to_id).maybeSingle();
+  return data?.wa_message_id || null;
+}
+
+/**
+ * Envia de fato uma mensagem já gravada (texto ou anexo). Anexos são
+ * carregados na Meta na primeira vez; o id fica em message.media.waId.
+ */
+async function transmit(session, message) {
+  const replyTo = await replyWaId(message);
+  if (!message.media) return sendWhatsAppMessage(session.phone, message.content, { replyTo });
+
+  if (!message.media.waId) {
+    let buffer;
+    try {
+      buffer = await readMedia(message.media);
+    } catch (error) {
+      return { ok: false, error: error.message };
+    }
+    const upload = await uploadWhatsAppMedia(buffer, message.media.mime, message.media.name);
+    if (!upload.ok) return upload;
+    message.media = { ...message.media, waId: upload.mediaId };
+  }
+  const { waId, caption, name } = message.media;
+  return sendWhatsAppMedia(session.phone, { type: message.message_type, mediaId: waId, caption, filename: name }, { replyTo });
 }
 
 /**
@@ -81,14 +123,34 @@ async function saveResult(message, result) {
  * @param {{ id?: string|null, name?: string }} [opts.sender] - funcionário (role "human")
  * @param {{ name: string, language?: string, params?: string[] }} [opts.template] - envia um modelo aprovado
  * @param {boolean} [opts.enforceWindow] - fora da janela de 24 h, nem tenta: grava como falha
+ * @param {string} [opts.type] - message_type ("text" ou o tipo do anexo)
+ * @param {Object} [opts.media] - descrição do anexo (mediaService.saveMedia)
+ * @param {string} [opts.replyToId] - mensagem citada (mesma conversa)
+ * @param {boolean} [opts.forwarded]
  * @returns {Promise<{ message: Object, ok: boolean }>}
  */
-export async function deliverMessage({ session, content, role = "assistant", sender = null, template = null, enforceWindow = true }) {
+export async function deliverMessage({
+  session,
+  content,
+  role = "assistant",
+  sender = null,
+  template = null,
+  enforceWindow = true,
+  type = "text",
+  media = null,
+  replyToId = null,
+  forwarded = false,
+}) {
   const message = {
     id: uuidv4(),
     session_id: session.id,
     role,
     content,
+    message_type: template ? "template" : type,
+    media,
+    reply_to_id: replyToId,
+    reactions: [],
+    forwarded,
     sender_user_id: role === "human" ? sender?.id || null : null,
     delivery_status: "pending",
     delivery_error: null,
@@ -105,7 +167,7 @@ export async function deliverMessage({ session, content, role = "assistant", sen
   } else if (enforceWindow && !(await getWindowState(session.id)).open) {
     result = { ok: false, error: WINDOW_CLOSED_ERROR };
   } else {
-    result = await sendWhatsAppMessage(session.phone, content);
+    result = await transmit(session, message);
   }
 
   await saveResult(message, result);
@@ -131,19 +193,19 @@ export async function sendReengageTemplate(session, sender) {
   });
 }
 
-/** Reenvia uma mensagem que falhou (mesmo texto, mesma linha no histórico). */
+/** Reenvia uma mensagem que falhou (mesmo conteúdo, mesma linha no histórico). */
 export async function retryMessage(messageId) {
   const db = getDb();
   const { data: message, error } = await db.from("messages").select("*").eq("id", messageId).maybeSingle();
   if (error) throw new Error(error.message);
   if (!message) throw Object.assign(new Error("Mensagem não encontrada."), { status: 404 });
-  if (message.delivery_status !== "failed") {
+  if (message.delivery_status !== "failed" || message.deleted_at) {
     throw Object.assign(new Error("Só é possível reenviar mensagens que falharam."), { status: 409 });
   }
   const { data: session } = await db.from("sessions").select("*").eq("id", message.session_id).maybeSingle();
   if (!session) throw Object.assign(new Error("Conversa não encontrada."), { status: 404 });
 
-  const isTemplate = message.content.startsWith("[Modelo de mensagem: ");
+  const isTemplate = isTemplateMessage(message);
   if (!isTemplate && !(await getWindowState(session.id)).open) {
     throw Object.assign(new Error(WINDOW_CLOSED_ERROR), { status: 409, code: "WINDOW_CLOSED" });
   }
@@ -155,7 +217,7 @@ export async function retryMessage(messageId) {
 
   const result = isTemplate
     ? await sendWhatsAppTemplate(session.phone, REENGAGE_TEMPLATE, REENGAGE_TEMPLATE_LANG)
-    : await sendWhatsAppMessage(session.phone, message.content);
+    : await transmit(session, message);
   await saveResult(message, result);
   return { message, ok: result.ok };
 }

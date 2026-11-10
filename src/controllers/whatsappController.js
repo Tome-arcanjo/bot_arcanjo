@@ -3,17 +3,21 @@ import crypto from "crypto";
 import {
   getOrCreateSessionByPhone,
   getSessionById,
+  getMessageByWaId,
   saveIncomingMessage,
   generateAiReply,
 } from "../services/chatService.js";
-import { markMessageAsRead, describeMetaError } from "../services/whatsappService.js";
+import { markMessageAsRead, describeMetaError, downloadWhatsAppMedia } from "../services/whatsappService.js";
+import { saveMedia } from "../services/mediaService.js";
+import { applyClientReaction } from "../services/messageActionsService.js";
 import { deliverMessage, applyDeliveryStatus } from "../services/outboundService.js";
+import { syncIncomingContact } from "../services/atendimentoService.js";
 
 const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN;
 const APP_SECRET = process.env.WHATSAPP_APP_SECRET;
 
-// Tipos de mensagem que ainda não sabemos processar — respondemos com uma
-// mensagem amigável em vez de deixar o usuário sem resposta nenhuma.
+// Tipos que não são texto. Anexos ficam guardados para a equipe ver no painel;
+// a IA só lê texto, então (com ela ativa) pede o conteúdo por escrito.
 const UNSUPPORTED_TYPE_LABEL = {
   image: "uma imagem",
   audio: "um áudio",
@@ -104,44 +108,98 @@ export async function receiveMessage(req, res) {
   }
 }
 
+const MEDIA_TYPES = new Set(["image", "audio", "video", "document", "sticker"]);
+
+/** Baixa o anexo da Meta e guarda no disco. Se falhar, fica a descrição com o erro. */
+async function fetchIncomingMedia(type, object = {}) {
+  const base = { mime: object.mime_type || null, name: object.filename || null, caption: object.caption || null, waId: object.id || null };
+  if (!object.id) return { ...base, error: "A Meta não informou o anexo." };
+  const download = await downloadWhatsAppMedia(object.id);
+  if (!download.ok) {
+    console.warn(`[WhatsApp] Não foi possível baixar ${type} ${object.id}: ${download.error}`);
+    return { ...base, error: download.error };
+  }
+  return saveMedia(download.buffer, { mime: download.mime || base.mime, name: base.name, caption: base.caption, waId: object.id });
+}
+
+/**
+ * Traduz a mensagem da Meta para o que gravamos: { type, content, media,
+ * classify, autoReply }. content é o que a IA lê (texto, ou um aviso como
+ * "[O cliente enviou uma imagem]: legenda").
+ */
+async function parseIncoming(message) {
+  const text =
+    message.type === "text" ? message.text?.body
+    : message.type === "interactive" ? message.interactive?.button_reply?.title || message.interactive?.list_reply?.title
+    : message.type === "button" ? message.button?.text
+    : null;
+  if (text) return { type: "text", content: text, media: null, classify: true };
+
+  const label = UNSUPPORTED_TYPE_LABEL[message.type] || UNSUPPORTED_TYPE_LABEL.unknown;
+  if (MEDIA_TYPES.has(message.type)) {
+    const object = message[message.type];
+    const media = object ? await fetchIncomingMedia(message.type, object) : null;
+    const caption = object?.caption ? `: ${object.caption}` : "";
+    return {
+      type: message.type,
+      content: `[O cliente enviou ${label}]${caption}`,
+      media,
+      classify: false,
+      // Figurinha não precisa de explicação: a IA responde normalmente.
+      autoReply: message.type === "sticker"
+        ? null
+        : `Recebi ${label} e já deixei registrado para a nossa equipe 👍 Como sou um assistente virtual, ainda não consigo processar ${label} — pode me contar por escrito?`,
+    };
+  }
+  return {
+    type: message.type === "location" || message.type === "contacts" ? message.type : "unsupported",
+    content: `[O cliente enviou ${label} — tipo ainda não suportado pelo bot]`,
+    media: null,
+    classify: false,
+    autoReply: `No momento eu ainda não consigo processar ${label} 🙏 — pode me enviar como texto?`,
+  };
+}
+
 async function handleIncomingMessage(message, value) {
   const fromPhone = message.from; // Ex: 5511999999999
   const contact = (value.contacts || []).find((c) => c.wa_id === fromPhone) || value.contacts?.[0];
-  const senderName = contact?.profile?.name || "Usuário";
+  const profileName = contact?.profile?.name || null; // nome do perfil do WhatsApp (a Cloud API não manda foto)
+  const senderName = profileName || "Usuário";
+
+  // Reação do cliente a uma mensagem: só atualiza a mensagem, sem resposta.
+  if (message.type === "reaction") {
+    await applyClientReaction(message.reaction?.message_id, message.reaction?.emoji, profileName).catch((e) =>
+      console.error(`[WhatsApp] Erro ao aplicar reação de ${fromPhone}:`, e.message)
+    );
+    return;
+  }
+
+  // A Meta reenvia o webhook quando não recebe 200 a tempo: não duplica.
+  if (message.id && (await getMessageByWaId(message.id))) return;
 
   // Marca como lida em paralelo — não bloqueia o fluxo principal se falhar.
   markMessageAsRead(message.id).catch(() => {});
 
-  let textContent;
-  if (message.type === "text") {
-    textContent = message.text.body;
-  } else if (message.type === "interactive") {
-    // Resposta de botão ou lista interativa
-    textContent =
-      message.interactive?.button_reply?.title ||
-      message.interactive?.list_reply?.title ||
-      null;
-  } else if (message.type === "button") {
-    textContent = message.button?.text || null;
-  }
-
   try {
-    // 1. Obtém ou cria a sessão vinculada ao telefone
-    const session = await getOrCreateSessionByPhone(fromPhone);
+    // 1. Obtém ou cria a sessão vinculada ao telefone e guarda o nome do
+    //    WhatsApp (e reabre no quadro de Atendimento quem estava finalizado).
+    let session = await getOrCreateSessionByPhone(fromPhone);
+    session = await syncIncomingContact(session, profileName);
 
     // 2. Salva a mensagem do cliente (sempre — com IA ativa ou pausada) e
     //    dispara a classificação do CRM. Tipos não suportados ficam
     //    registrados como aviso, para a equipe ver que o cliente mandou algo.
-    let autoReply;
-    if (textContent) {
-      console.log(`[WhatsApp] Recebido de ${fromPhone} (${senderName}): ${textContent}`);
-      await saveIncomingMessage(session, textContent);
-    } else {
-      const label = UNSUPPORTED_TYPE_LABEL[message.type] || UNSUPPORTED_TYPE_LABEL.unknown;
-      console.log(`[WhatsApp] Recebido de ${fromPhone}: mensagem do tipo "${message.type}" (não suportada)`);
-      await saveIncomingMessage(session, `[O cliente enviou ${label} — tipo ainda não suportado pelo bot]`, { classify: false });
-      autoReply = `No momento eu ainda não consigo processar ${label} 🙏 — pode me enviar como texto?`;
-    }
+    const incoming = await parseIncoming(message);
+    let autoReply = incoming.autoReply || null;
+    console.log(`[WhatsApp] Recebido de ${fromPhone} (${senderName}) [${incoming.type}]: ${incoming.content}`);
+    const replyTo = message.context?.id ? await getMessageByWaId(message.context.id) : null;
+    await saveIncomingMessage(session, incoming.content, {
+      classify: incoming.classify,
+      type: incoming.type,
+      media: incoming.media,
+      waMessageId: message.id || null,
+      replyToId: replyTo?.session_id === session.id ? replyTo.id : null,
+    });
 
     // 3. Atendimento humano: a IA não responde essa conversa.
     if (session.ai_paused) {

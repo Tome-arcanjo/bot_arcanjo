@@ -27,10 +27,24 @@ export function webhook(server) {
 
   let n = 0;
   return {
-    /** Cliente manda uma mensagem de texto (ou outro tipo, com `type`). */
-    text(from, text, { name = "Cliente", type = "text" } = {}) {
-      const message = { from, id: `wamid.in.${Date.now()}.${n++}`, timestamp: String(Math.floor(Date.now() / 1000)), type };
+    /**
+     * Cliente manda uma mensagem de texto (ou outro tipo, com `type`).
+     * id: wamid fixo (para testar repetição); context: wamid citado.
+     */
+    text(from, text, { name = "Cliente", type = "text", id, context } = {}) {
+      const message = { from, id: id || `wamid.in.${Date.now()}.${n++}`, timestamp: String(Math.floor(Date.now() / 1000)), type };
       if (type === "text") message.text = { body: text };
+      if (context) message.context = { from, id: context };
+      return post({ contacts: [{ wa_id: from, profile: { name } }], messages: [message] }).then(() => message.id);
+    },
+    /** Cliente manda um anexo: media = { id, mime_type, caption?, filename? } (id da Graph falsa). */
+    media(from, type, media, { name = "Cliente" } = {}) {
+      const message = { from, id: `wamid.in.${Date.now()}.${n++}`, timestamp: String(Math.floor(Date.now() / 1000)), type, [type]: media };
+      return post({ contacts: [{ wa_id: from, profile: { name } }], messages: [message] }).then(() => message.id);
+    },
+    /** Cliente reage a uma mensagem (emoji "" tira a reação). */
+    reaction(from, waMessageId, emoji, { name = "Cliente" } = {}) {
+      const message = { from, id: `wamid.in.${Date.now()}.${n++}`, timestamp: String(Math.floor(Date.now() / 1000)), type: "reaction", reaction: { message_id: waMessageId, emoji } };
       return post({ contacts: [{ wa_id: from, profile: { name } }], messages: [message] });
     },
     /** A Meta avisa o status de uma mensagem que enviamos. */
@@ -45,18 +59,36 @@ export function webhook(server) {
 /**
  * Graph API falsa. Responde como a Cloud API: { messages: [{ id }] }.
  * Para o número `failFor` responde com o erro informado (ex: código 131030).
+ * Anexos: POST .../media (upload) devolve { id }; `media` = { [id]: { mime, data } }
+ * são os arquivos que os clientes "mandaram" (GET /vXX/<id> e o download).
  */
-export async function startFakeGraph({ failFor = {} } = {}) {
+export async function startFakeGraph({ failFor = {}, media = {} } = {}) {
   const requests = [];
   let n = 0;
   const port = await freePort();
+  const base = `http://127.0.0.1:${port}`;
   const srv = http.createServer((req, res) => {
-    let raw = "";
-    req.on("data", (c) => (raw += c));
+    const chunks = [];
+    req.on("data", (c) => chunks.push(c));
     req.on("end", () => {
-      const body = raw ? JSON.parse(raw) : {};
-      requests.push({ url: req.url, auth: req.headers.authorization, body });
+      const raw = Buffer.concat(chunks);
+      const isJson = String(req.headers["content-type"] || "").includes("json");
+      const body = isJson && raw.length ? JSON.parse(raw) : raw.length ? { upload: true, size: raw.length, raw: raw.toString("latin1") } : {};
+      requests.push({ url: req.url, method: req.method, auth: req.headers.authorization, body });
+
+      const file = req.url.match(/^\/files\/(.+)$/);
+      if (file && media[file[1]]) {
+        res.setHeader("content-type", media[file[1]].mime);
+        return res.end(media[file[1]].data);
+      }
       res.setHeader("content-type", "application/json");
+      const info = req.method === "GET" && req.url.match(/^\/v[\d.]+\/([^/?]+)$/);
+      if (info) {
+        const m = media[info[1]];
+        if (!m) return (res.statusCode = 404), res.end(JSON.stringify({ error: { code: 100, message: "media not found" } }));
+        return res.end(JSON.stringify({ url: `${base}/files/${info[1]}`, mime_type: m.mime, id: info[1] }));
+      }
+      if (req.url.endsWith("/media")) return res.end(JSON.stringify({ id: `media.out.${++n}` }));
       const failure = failFor[body.to];
       if (failure) {
         res.statusCode = 400;
@@ -67,10 +99,12 @@ export async function startFakeGraph({ failFor = {} } = {}) {
   });
   await new Promise((r) => srv.listen(port, "127.0.0.1", r));
   return {
-    url: `http://127.0.0.1:${port}`,
+    url: base,
     requests,
-    /** Envios de mensagem (ignora os "marcar como lida"). */
+    /** Envios de mensagem (ignora os "marcar como lida" e os uploads). */
     sends: () => requests.filter((r) => r.body.type),
+    /** Uploads de anexo (POST .../media). */
+    uploads: () => requests.filter((r) => r.body.upload),
     close: () => new Promise((r) => srv.close(r)),
   };
 }

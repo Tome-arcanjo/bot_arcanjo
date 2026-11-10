@@ -1,4 +1,7 @@
 import { getDb } from "../database/db.js";
+import eventBus from "../utils/events.js";
+import { isValidTag } from "../constants/tags.js";
+import { actorOf } from "./caseEventsService.js";
 
 /**
  * Serviço da tabela "clients" — o cadastro de contatos (nome, email,
@@ -63,5 +66,30 @@ export async function upsertClientInfo(phone, fields) {
     console.error(`[Clients] Erro ao salvar contato ${phone}:`, error);
     return null;
   }
+  return data;
+}
+
+/**
+ * Troca as etiquetas jurídicas do cliente (ids de src/constants/tags.js).
+ * Cria o contato se ainda não existir. Avisa o painel ("clientUpdated", SSE
+ * "client" em /api/conversas/stream) para conversas e quadro atualizarem.
+ */
+export async function setClientTags(phone, tags, actor) {
+  const cleanPhone = String(phone || "").replace(/\D/g, "");
+  if (!cleanPhone) throw Object.assign(new Error("Telefone inválido."), { status: 400 });
+  const list = [...new Set(Array.isArray(tags) ? tags : [])];
+  const invalid = list.filter((t) => !isValidTag(t));
+  if (invalid.length) throw Object.assign(new Error(`Etiqueta desconhecida: ${invalid.join(", ")}`), { status: 400 });
+
+  const { data, error } = await getDb()
+    .from("clients")
+    .upsert({ phone: cleanPhone, tags: list, updated_at: new Date().toISOString() }, { onConflict: "phone" })
+    .select()
+    .single();
+  if (error) {
+    console.error(`[Clients] Erro ao salvar etiquetas de ${cleanPhone}:`, error.message);
+    throw new Error("Não foi possível salvar as etiquetas. Confira se a migração do banco foi aplicada.");
+  }
+  eventBus.emit("clientUpdated", { phone: cleanPhone, tags: data.tags || list, actor: actorOf(actor) });
   return data;
 }

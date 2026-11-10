@@ -357,8 +357,16 @@ describe("Conversas no navegador (Ana e Bia ao mesmo tempo)", { skip: noBrowser 
   // Visível de verdade (estilo computado), não só a propriedade hidden.
   const visible = (page, id) => page.eval(`getComputedStyle(document.getElementById(${JSON.stringify(id)})).display !== "none"`);
 
+  // A conversa pode estar em qualquer aba (Chats / Pendentes / Contatos).
   const openItem = (page, phone) =>
-    page.eval(`[...document.querySelectorAll(".conversa-item")].find((b) => b.textContent.includes(${JSON.stringify(phone)})).click()`);
+    page.eval(`(() => {
+      const find = () => document.querySelector('.conversa-item[data-phone="${phone}"]');
+      for (const tab of ["chats", "pendentes", "contatos"]) {
+        if (find()) break;
+        document.querySelector('[data-tab="' + tab + '"]').click();
+      }
+      find().click();
+    })()`);
 
   before(async () => {
     server = await startServer({ env: { ...BASE_ENV, WHATSAPP_SIMULATE: "true" }, db: { users: teamRows(), ...oldConversation() } });

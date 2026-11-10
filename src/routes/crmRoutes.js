@@ -13,7 +13,7 @@ import { listCaseEvents } from "../services/caseEventsService.js";
 import { listTeam, getUserById } from "../services/usersService.js";
 import { CRM_COLUMNS, isValidStatus } from "../constants/crm.js";
 import { requireAdmin } from "../middleware/auth.js";
-import { openSseStream } from "../utils/sse.js";
+import { openSseStream, isUserOnline } from "../utils/sse.js";
 
 const router = Router();
 
@@ -35,10 +35,12 @@ router.get("/columns", (req, res) => {
   res.json({ success: true, data: CRM_COLUMNS });
 });
 
-// Equipe ({ id, name, role, active }) para o seletor de responsável e os avatares
+// Equipe ({ id, name, role, active, online }) para o seletor de responsável, os
+// avatares e a transferência de conversas (online = com o painel aberto agora)
 router.get("/users", async (req, res) => {
   try {
-    res.json({ success: true, data: await listTeam() });
+    const team = await listTeam();
+    res.json({ success: true, data: team.map((u) => ({ ...u, online: isUserOnline(u.id) })) });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }

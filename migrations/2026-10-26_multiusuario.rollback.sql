@@ -10,6 +10,9 @@
 --
 -- Só rode depois de voltar o código para uma versão anterior à Fase 1 —
 -- o código novo depende dessas tabelas.
+--
+-- Rode ANTES o rollback de 2026-11-04_quadro_atendimento (se aplicada):
+-- sessions.board_stage_changed_by aponta para users e impede o DROP abaixo.
 -- ============================================================
 
 BEGIN;

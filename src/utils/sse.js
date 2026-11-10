@@ -1,5 +1,21 @@
 import eventBus from "./events.js";
 
+// Quem está com o painel aberto agora: conexões SSE abertas por usuário (em
+// memória — uma instância só). Usado para mostrar quem está disponível ao
+// transferir uma conversa.
+const openStreams = new Map(); // userId -> nº de conexões
+
+export function isUserOnline(userId) {
+  return Boolean(userId) && (openStreams.get(userId) || 0) > 0;
+}
+
+function trackOnline(userId, delta) {
+  if (!userId) return;
+  const next = (openStreams.get(userId) || 0) + delta;
+  if (next > 0) openStreams.set(userId, next);
+  else openStreams.delete(userId);
+}
+
 /**
  * Abre um stream SSE (Server-Sent Events) que repassa eventos do eventBus
  * para o navegador. Usado pelos tempos reais do painel (/api/conversas/stream
@@ -59,6 +75,7 @@ export function openSseStream(req, res, subscriptions) {
   // Usuário desativado / com papel ou senha trocados: as sessões dele já
   // foram apagadas, mas esta conexão aberta continuaria recebendo eventos.
   const userId = req.session?.user?.id;
+  trackOnline(userId, 1);
   const onUserRevoked = ({ userId: revokedId }) => {
     if (userId && revokedId === userId) {
       cleanup();
@@ -70,6 +87,7 @@ export function openSseStream(req, res, subscriptions) {
   function cleanup() {
     if (closed) return;
     closed = true;
+    trackOnline(userId, -1);
     clearInterval(heartbeat);
     for (const { on, listener } of listeners) eventBus.off(on, listener);
     eventBus.off("userRevoked", onUserRevoked);

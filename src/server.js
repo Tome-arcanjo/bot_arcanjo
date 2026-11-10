@@ -21,6 +21,7 @@ import {
   configuracoesView,
   canaisView,
   crmView,
+  atendimentoView,
   conversasView,
   contatosView,
   usuariosView,
@@ -170,7 +171,8 @@ app.use("/webhook/whatsapp", whatsappRoutes);
 app.get("/admin", (req, res) => res.redirect("/dashboard/canais"));
 app.get("/dashboard", dashboardRoot);
 app.get("/dashboard/configuracoes", requireAdmin, configuracoesView); // personalidade do bot: só admin
-app.get("/dashboard/crm", crmView);
+app.get("/dashboard/atendimento", atendimentoView);
+app.get("/dashboard/crm", requireAdmin, crmView); // CRM de casos: só admin (atendentes usam o Atendimento)
 app.get("/dashboard/conversas", conversasView);
 app.get("/dashboard/contatos", contatosView);
 app.get("/dashboard/canais", canaisView);
@@ -185,6 +187,10 @@ app.get("/", (req, res) => res.redirect("/dashboard"));
 
 // ── Handler de erros não tratados ──
 app.use((err, req, res, next) => {
+  // Anexo maior que o limite (express.raw em /api/conversas/:id/media).
+  if (err.type === "entity.too.large") {
+    return res.status(413).json({ success: false, error: "Arquivo grande demais (máximo de 25 MB)." });
+  }
   console.error("[Server Error]", err.message);
   res.status(500).json({ success: false, error: "Erro interno do servidor." });
 });

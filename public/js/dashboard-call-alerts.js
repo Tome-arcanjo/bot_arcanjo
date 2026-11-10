@@ -147,8 +147,8 @@
       const toast = document.createElement("div");
       toast.className = "call-toast";
       toast.innerHTML = `
-        <button type="button" class="call-toast-close" title="Dispensar" aria-label="Dispensar">✕</button>
-        <div class="call-toast-title">⏰ Ligação atrasada</div>
+        <button type="button" class="call-toast-close" title="Dispensar" aria-label="Dispensar">${window.Dash.icon("x")}</button>
+        <div class="call-toast-title">${window.Dash.icon("clock")} Ligação atrasada</div>
         <div class="call-toast-body">${escapeHtml(describe(call))}</div>
         <div class="call-toast-meta">Aviso ${call.slot + 1} de ${call.total} · repete a cada 30 min</div>
         <a class="call-toast-link" href="/dashboard/crm">Abrir CRM</a>
@@ -265,7 +265,7 @@
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "btn btn-secondary";
-    btn.textContent = "🔔 Ativar alertas";
+    btn.innerHTML = `${window.Dash.icon("bell")}Ativar alertas`;
     btn.title = "Permitir notificações do navegador para ligações atrasadas";
     btn.addEventListener("click", async () => {
       unlockAudio();
