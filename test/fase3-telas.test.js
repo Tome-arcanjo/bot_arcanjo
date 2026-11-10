@@ -26,7 +26,8 @@ async function sidOf(server, who) {
 
 test("todos os scripts de public/js têm sintaxe válida", () => {
   const dir = path.join(ROOT, "public/js");
-  for (const file of fs.readdirSync(dir).filter((f) => f.endsWith(".js"))) {
+  // recursive: inclui os módulos de public/js/conversas/
+  for (const file of fs.readdirSync(dir, { recursive: true }).filter((f) => f.endsWith(".js"))) {
     execFileSync(process.execPath, ["--check", path.join(dir, file)]);
   }
 });
@@ -55,10 +56,16 @@ describe("layout por papel (HTML)", () => {
   test("atendente não vê Usuários nem Configurações e recebe 403 no layout", async () => {
     const bia = makeClient(server.url);
     await loginAs(bia, TEAM.bia);
-    const { html } = await page(bia, "/dashboard/crm");
+    const { html } = await page(bia, "/dashboard/atendimento");
     assert.doesNotMatch(html, /href="\/dashboard\/usuarios"/);
     assert.doesNotMatch(html, /href="\/dashboard\/configuracoes"/);
+    assert.doesNotMatch(html, /href="\/dashboard\/crm"/);
     assert.match(html, />Atendente</);
+
+    // O CRM de casos é do admin; atendentes usam o quadro de Atendimento.
+    const crm = await page(bia, "/dashboard/crm");
+    assert.equal(crm.status, 403);
+    assert.match(crm.html, /restrita a administradores/);
 
     const forbidden = await page(bia, "/dashboard/usuarios");
     assert.equal(forbidden.status, 403);
@@ -190,13 +197,13 @@ describe("telas no navegador", { skip: noBrowser }, () => {
   test("telas do atendente carregam sem erro e sem os itens de admin", async () => {
     const p = await browser.newPage(server.url);
     await p.login(await sidOf(server, GIL));
-    for (const url of ["/dashboard/crm", "/dashboard/conversas", "/dashboard/contatos", "/dashboard/canais"]) {
+    for (const url of ["/dashboard/atendimento", "/dashboard/conversas", "/dashboard/contatos", "/dashboard/canais"]) {
       await p.goto(url);
       const nav = await p.eval(() => [...document.querySelectorAll(".dash-nav a")].map((a) => a.textContent.trim()));
-      assert.deepEqual(nav, ["Dashboard", "Conversas", "Contatos", "Canais"], url);
+      assert.deepEqual(nav, ["Atendimento", "Conversas", "Contatos", "Canais"], url);
     }
-    await p.goto("/dashboard/crm");
-    await p.screenshot(path.join(SHOTS, "fase3-crm-atendente.png"));
+    await p.goto("/dashboard/atendimento");
+    await p.screenshot(path.join(SHOTS, "fase3-atendimento-atendente.png"));
     assert.deepEqual(p.errors, []);
   });
 

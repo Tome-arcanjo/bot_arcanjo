@@ -156,6 +156,10 @@ describe("Kanban compartilhado (API + SSE)", () => {
   });
 });
 
+// A tela do CRM é só de admin (atendentes usam o quadro de Atendimento), então
+// aqui a Bia também é admin. As regras de atendente ficam nos testes de API.
+const twoAdmins = () => ({ ...db(), users: teamRows().map((u) => (u.id === TEAM.bia.id ? { ...u, role: "admin" } : u)) });
+
 describe("Kanban no navegador (Ana e Bia ao mesmo tempo)", { skip: noBrowser }, () => {
   let server;
   let browser;
@@ -191,7 +195,7 @@ describe("Kanban no navegador (Ana e Bia ao mesmo tempo)", { skip: noBrowser }, 
     page.eval(`(() => { const c = [...document.querySelectorAll(".crm-card")].find((x) => x.dataset.id === ${JSON.stringify(caseId)}); return c ? c.closest(".crm-column").dataset.status : null; })()`);
 
   before(async () => {
-    server = await startServer({ env: EMERGENCY_ENV, db: db() });
+    server = await startServer({ env: EMERGENCY_ENV, db: twoAdmins() });
     browser = await launchBrowser();
     anaPage = await openCrm(TEAM.ana);
     biaPage = await openCrm(TEAM.bia);
@@ -252,9 +256,10 @@ describe("Kanban no navegador (Ana e Bia ao mesmo tempo)", { skip: noBrowser }, 
     assert.equal(await anaPage.eval(() => document.querySelectorAll(".crm-card").length), 3);
   });
 
-  test("histórico do caso e botão de excluir só para admin", async () => {
+  test("histórico do caso; a tela do CRM (com o excluir) é só de admin", async () => {
     assert.ok(await anaPage.eval(() => document.querySelectorAll(".crm-card-delete").length === 3));
-    assert.equal(await biaPage.eval(() => document.querySelectorAll(".crm-card-delete").length), 0);
+    const caio = await logged(server, TEAM.caio);
+    assert.equal((await caio.request("/dashboard/crm")).status, 403);
 
     await anaPage.eval(`[...document.querySelectorAll(".crm-card")].find((x) => x.dataset.id === "c1").querySelector("[data-history]").click()`);
     const items = await anaPage.waitFor(() => {

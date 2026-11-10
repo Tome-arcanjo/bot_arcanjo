@@ -92,6 +92,59 @@ export async function getSessionById(sessionId) {
   return data;
 }
 
+export async function getMessageByWaId(waMessageId) {
+  if (!waMessageId) return null;
+  const { data, error } = await getDb().from("messages").select("*").eq("wa_message_id", waMessageId).limit(1);
+  if (error) throw new Error(error.message);
+  return data?.[0] || null;
+}
+
+/**
+ * Conversas para a caixa de entrada e o quadro de Atendimento, com:
+ *  - lastMessage: prévia da última mensagem;
+ *  - unanswered: mensagens do cliente depois da última resposta (IA ou equipe);
+ *  - client_name / client_tags: nome e etiquetas do cadastro (Contatos).
+ * Usada pela API e pelas telas, que já vêm com a lista no HTML.
+ */
+export async function listConversations() {
+  const db = getDb();
+  const [sessions, { data: recent, error }, { data: clients }] = await Promise.all([
+    listSessions(),
+    // Um lote recente de mensagens de uma vez (em vez de 1 query por sessão).
+    db
+      .from("messages")
+      .select("id, session_id, content, role, message_type, sender_user_id, delivery_status, deleted_at, created_at")
+      .order("created_at", { ascending: false })
+      .limit(1000),
+    // Falhar aqui não impede a lista: nome e etiquetas do cadastro são extras.
+    db.from("clients").select("phone, name, tags"),
+  ]);
+  if (error) throw new Error(error.message);
+
+  const clientByPhone = new Map((clients || []).map((c) => [c.phone, c]));
+  const bySession = new Map();
+  for (const m of recent || []) {
+    const entry = bySession.get(m.session_id) || { lastMessage: m, unanswered: 0, answered: false };
+    if (!entry.answered) {
+      if (m.role === "user") entry.unanswered++;
+      else if (m.role === "assistant" || m.role === "human") entry.answered = true;
+    }
+    bySession.set(m.session_id, entry);
+  }
+
+  return sessions.map((s) => {
+    const client = s.phone ? clientByPhone.get(s.phone) : null;
+    const entry = bySession.get(s.id);
+    return {
+      ...s,
+      client_name: client?.name || null,
+      client_tags: client?.tags || [],
+      lastMessage: entry?.lastMessage || null,
+      unanswered: entry?.unanswered || 0,
+    };
+  });
+}
+
 /**
  * Lista todas as sessoes de conversa
  */
@@ -137,16 +190,30 @@ export async function getSessionMessages(sessionId) {
  * classificado.
  *
  * @param {Object} session - linha de sessions
- * @param {string} content
- * @param {{ classify?: boolean }} [opts] - classify: false para avisos como "[o cliente enviou uma imagem]"
+ * @param {string} content - texto (o que a IA lê; para anexos, um aviso com a legenda)
+ * @param {Object} [opts]
+ * @param {boolean} [opts.classify] - false para avisos como "[o cliente enviou uma imagem]"
+ * @param {string} [opts.type] - message_type (text, image, audio...)
+ * @param {Object} [opts.media] - anexo já guardado (mediaService.saveMedia)
+ * @param {string} [opts.waMessageId] - id da Meta (para responder/reagir e não duplicar)
+ * @param {string} [opts.replyToId] - mensagem que o cliente citou
  */
-export async function saveIncomingMessage(session, content, { classify = true } = {}) {
+export async function saveIncomingMessage(
+  session,
+  content,
+  { classify = true, type = "text", media = null, waMessageId = null, replyToId = null } = {}
+) {
   const db = getDb();
   const message = {
     id: uuidv4(),
     session_id: session.id,
     role: "user",
     content,
+    message_type: type,
+    media,
+    wa_message_id: waMessageId,
+    reply_to_id: replyToId,
+    reactions: [],
     created_at: new Date().toISOString(),
   };
   const { error } = await db.from("messages").insert(message);

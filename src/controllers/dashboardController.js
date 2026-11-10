@@ -1,6 +1,11 @@
 import { getDb } from "../database/db.js";
 import { renderDashboardLayout, inlineJson } from "../views/dashboardLayout.js";
+import { iconSvg } from "../views/icons.js";
 import { CRM_COLUMNS } from "../constants/crm.js";
+import { ATENDIMENTO_COLUMNS } from "../constants/atendimento.js";
+import { listConversations } from "../services/chatService.js";
+import { listTeam } from "../services/usersService.js";
+import { isUserOnline } from "../utils/sse.js";
 
 // GET /dashboard — aterrissagem padrão pós-login: manda pra Conversas.
 export function dashboardRoot(req, res) {
@@ -40,7 +45,7 @@ Responda sempre em português, de forma breve.">Triagem (recomendado)</button>
 
       <div style="margin-top:24px; display:flex; align-items:center; gap:12px;">
         <button type="button" class="btn btn-primary" id="btnSavePrompt">Salvar</button>
-        <span id="saveStatus" style="font-size:0.82rem; color:var(--success); display:none;">Salvo com sucesso ✓</span>
+        <span id="saveStatus" style="font-size:0.82rem; color:var(--success); display:none;">${iconSvg("check")} Salvo com sucesso</span>
       </div>
     </div>
 
@@ -75,7 +80,7 @@ export async function canaisView(req, res) {
 
     const rows = (messages || []).map((m) => {
       const session = m.sessions || {};
-      const origin = session.phone ? `📱 ${session.phone}` : `💻 ${session.title || "Web"}`;
+      const origin = session.phone ? `${iconSvg("smartphone")} ${session.phone}` : `${iconSvg("monitor")} ${session.title || "Web"}`;
       const roleBadge = m.role === "user"
         ? `<span class="badge badge-blue">Cliente</span>`
         : m.role === "human"
@@ -100,7 +105,7 @@ export async function canaisView(req, res) {
       </div>
     `;
 
-    const topbarActions = `<a href="/dashboard/canais" class="btn btn-secondary">↺ Atualizar</a>`;
+    const topbarActions = `<a href="/dashboard/canais" class="btn btn-secondary">${iconSvg("refresh")}Atualizar</a>`;
     res.send(renderDashboardLayout({ active: "canais", title: "Canais", content, topbarActions, user: req.session.user }));
   } catch (error) {
     console.error("[Canais] Erro ao carregar:", error.message);
@@ -130,7 +135,7 @@ export function crmView(req, res) {
       <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="historicoTitulo">
         <div class="modal-header">
           <h2 id="historicoTitulo">Histórico do caso</h2>
-          <button type="button" class="modal-close" id="historicoClose" aria-label="Fechar">✕</button>
+          <button type="button" class="modal-close" id="historicoClose" aria-label="Fechar">${iconSvg("x")}</button>
         </div>
         <div class="modal-body">
           <p id="historicoCliente" style="margin:0 0 12px; font-size:0.86rem; color:var(--text-secondary);"></p>
@@ -143,7 +148,7 @@ export function crmView(req, res) {
       <div class="modal-card">
         <div class="modal-header">
           <h2>Novo caso</h2>
-          <button type="button" class="modal-close" id="novoCasoClose">✕</button>
+          <button type="button" class="modal-close" id="novoCasoClose">${iconSvg("x")}</button>
         </div>
         <div class="modal-body">
           <label class="field-label" for="novoCasoPhone">Telefone (WhatsApp) *</label>
@@ -168,7 +173,7 @@ export function crmView(req, res) {
       <div class="modal-card">
         <div class="modal-header">
           <h2 id="ligacaoTitulo">Agendar ligação</h2>
-          <button type="button" class="modal-close" id="ligacaoClose">✕</button>
+          <button type="button" class="modal-close" id="ligacaoClose">${iconSvg("x")}</button>
         </div>
         <div class="modal-body">
           <p id="ligacaoCliente" style="margin:0 0 14px; font-size:0.86rem; color:var(--text-secondary);"></p>
@@ -202,23 +207,87 @@ export function crmView(req, res) {
   }));
 }
 
-// ── Conversas (inbox por cliente) ──────────────────────────────────────
-export function conversasView(req, res) {
+// Dados iniciais das telas de Conversas e Atendimento, já no HTML: a lista
+// aparece sem esperar a primeira chamada à API. Se falhar, a tela busca sozinha.
+async function conversationsBoot(page) {
+  try {
+    const [conversations, team] = await Promise.all([listConversations(), listTeam()]);
+    return { conversations, team: team.map((u) => ({ ...u, online: isUserOnline(u.id) })) };
+  } catch (error) {
+    console.error(`[${page}] Erro ao carregar os dados iniciais:`, error.message);
+    return null;
+  }
+}
+
+// ── Atendimento (quadro de clientes do WhatsApp, com drag-and-drop) ────
+export async function atendimentoView(req, res) {
   const content = `
-    <div class="conversas-layout">
-      <aside class="conversas-list" id="conversasList">
-        <p class="dash-empty">Carregando conversas...</p>
+    <div class="crm-toolbar">
+      <div class="crm-filters" id="atFilters" role="group" aria-label="Filtrar clientes">
+        <button type="button" class="crm-filter" data-filter="all">Todos</button>
+        <button type="button" class="crm-filter" data-filter="mine">Meus atendimentos</button>
+        <button type="button" class="crm-filter" data-filter="unassigned">Sem atendente</button>
+      </div>
+      <input type="search" id="atSearch" class="field-input at-search" placeholder="Buscar por nome ou telefone..." aria-label="Buscar cliente" />
+      <span class="crm-live" id="atLive" title="O quadro se atualiza sozinho quando chega mensagem ou alguém da equipe move um cliente">Conectando...</span>
+    </div>
+    <div id="atBoard" class="crm-board at-board">
+      <p class="dash-empty">Carregando clientes...</p>
+    </div>
+    <div class="crm-toasts" id="atToasts" aria-live="polite"></div>
+    <script src="/js/dashboard-atendimento.js"></script>
+  `;
+  res.send(renderDashboardLayout({
+    active: "atendimento",
+    title: "Atendimento",
+    content,
+    // Colunas vêm do servidor (src/constants/atendimento.js), a mesma lista que valida a etapa.
+    extraHead: `<link rel="stylesheet" href="/css/dashboard-crm.css" />
+  <link rel="stylesheet" href="/css/dashboard-atendimento.css" />
+  <script>window.ATENDIMENTO_COLUMNS = ${inlineJson(ATENDIMENTO_COLUMNS)};
+  window.CONVERSAS_BOOT = ${inlineJson(await conversationsBoot("Atendimento"))};</script>`,
+    hideBack: true,
+    user: req.session.user,
+  }));
+}
+
+// ── Conversas (estilo WhatsApp: abas, fila, anexos, ações nas mensagens) ─
+export async function conversasView(req, res) {
+  const content = `
+    <div class="conversas-layout" id="conversasLayout">
+      <aside class="conversas-sidebar">
+        <div class="conv-tabs" id="convTabs" role="tablist" aria-label="Conversas">
+          <button type="button" class="conv-tab" role="tab" data-tab="chats">Chats <span class="conv-tab-count"></span></button>
+          <button type="button" class="conv-tab" role="tab" data-tab="pendentes">Pendentes <span class="conv-tab-count"></span></button>
+          <button type="button" class="conv-tab" role="tab" data-tab="contatos">Contatos <span class="conv-tab-count"></span></button>
+        </div>
+        <div class="conv-tools">
+          <input type="search" id="convSearch" class="field-input" placeholder="Buscar nome, telefone ou etiqueta" aria-label="Buscar conversa" />
+          <div class="conv-tools-row">
+            <select id="convSort" class="field-input" aria-label="Ordenar"></select>
+            <select id="convTagFilter" class="field-input" aria-label="Filtrar por etiqueta"></select>
+          </div>
+        </div>
+        <div class="conversas-list" id="conversasList" role="list">
+          <p class="dash-empty">Carregando conversas...</p>
+        </div>
       </aside>
+
       <section class="conversas-main">
         <header class="thread-header" id="threadHeader" hidden>
-          <div class="thread-who">
-            <div class="thread-title" id="threadTitle"></div>
-            <div class="thread-sub" id="threadSub"></div>
-          </div>
+          <button type="button" class="thread-who-btn" id="btnInfo" title="Dados do cliente">
+            <span class="thread-avatar" id="threadAvatar"></span>
+            <span class="thread-who">
+              <span class="thread-title" id="threadTitle"></span>
+              <span class="thread-sub" id="threadSub"></span>
+            </span>
+          </button>
           <span class="badge" id="threadStatus"></span>
           <div class="thread-actions">
             <button type="button" class="btn btn-secondary btn-sm" id="btnAssumir" hidden>Assumir</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="btnTransferir">Transferir</button>
             <button type="button" class="btn btn-secondary btn-sm" id="btnDevolver" hidden>Devolver à IA</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="btnEncerrar">Encerrar</button>
           </div>
         </header>
         <div class="thread-presence" id="threadPresence" role="status" hidden></div>
@@ -227,22 +296,99 @@ export function conversasView(req, res) {
         </div>
         <div class="thread-window" id="threadWindow" role="status" hidden></div>
         <form class="thread-composer" id="threadComposer" hidden>
-          <div class="thread-composer-row">
+          <div class="composer-reply" id="composerReply" hidden></div>
+          <div class="composer-files" id="composerFiles" hidden></div>
+          <div class="composer-recording" id="composerRecording" hidden>
+            <button type="button" class="composer-icon" id="recCancel" title="Descartar" aria-label="Descartar áudio">${iconSvg("trash")}</button>
+            <span class="rec-dot"></span><span id="recTime">0:00</span>
+            <span class="rec-label">Gravando áudio…</span>
+            <button type="button" class="composer-send" id="recSend" title="Enviar áudio" aria-label="Enviar áudio">${iconSvg("send")}</button>
+          </div>
+          <div class="thread-composer-row" id="composerRow">
+            <button type="button" class="composer-icon" id="btnAttach" title="Anexar arquivos" aria-label="Anexar arquivos">${iconSvg("paperclip")}</button>
+            <button type="button" class="composer-icon" id="btnEmoji" title="Emojis e figurinhas" aria-label="Emojis e figurinhas">${iconSvg("sticker")}</button>
+            <input type="file" id="fileInput" multiple hidden />
             <textarea id="composerInput" class="field-textarea" rows="1" maxlength="4096"
               placeholder="Escreva uma mensagem…  (Enter envia, Shift+Enter quebra a linha)"></textarea>
-            <button type="submit" class="btn btn-primary" id="composerSend">Enviar</button>
+            <button type="button" class="composer-icon" id="btnMic" title="Gravar áudio" aria-label="Gravar áudio">${iconSvg("mic")}</button>
+            <button type="submit" class="composer-send" id="composerSend" title="Enviar" aria-label="Enviar" hidden>${iconSvg("send")}</button>
+          </div>
+          <div class="emoji-panel" id="emojiPanel" hidden>
+            <div class="emoji-tabs">
+              <button type="button" class="emoji-tab active" data-panel="emojis">${iconSvg("smile")}Emojis</button>
+              <button type="button" class="emoji-tab" data-panel="stickers">${iconSvg("sticker")}Figurinhas</button>
+            </div>
+            <div class="emoji-grid" id="emojiGrid"></div>
+            <div class="sticker-grid" id="stickerGrid" hidden></div>
           </div>
           <div class="thread-composer-hint" id="composerHint"></div>
         </form>
       </section>
+
+      <aside class="contact-drawer" id="contactDrawer" hidden aria-label="Dados do cliente"></aside>
     </div>
-    <script src="/js/dashboard-conversas.js"></script>
+
+    <div class="msg-menu" id="msgMenu" role="menu" hidden></div>
+
+    <div class="modal-overlay" id="transferOverlay">
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="transferTitle">
+        <div class="modal-header">
+          <h2 id="transferTitle">Transferir atendimento</h2>
+          <button type="button" class="modal-close" data-close aria-label="Fechar">${iconSvg("x")}</button>
+        </div>
+        <div class="modal-body">
+          <p class="modal-hint" style="margin-top:0;">A conversa passa para a pessoa escolhida e a IA fica pausada. O quadro de Atendimento atualiza na hora.</p>
+          <ul class="pick-list" id="transferList"></ul>
+          <p id="transferErro" class="modal-error" style="display:none;"></p>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="forwardOverlay">
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="forwardTitle">
+        <div class="modal-header">
+          <h2 id="forwardTitle">Encaminhar mensagem</h2>
+          <button type="button" class="modal-close" data-close aria-label="Fechar">${iconSvg("x")}</button>
+        </div>
+        <div class="modal-body">
+          <input type="search" id="forwardSearch" class="field-input" placeholder="Buscar conversa..." />
+          <ul class="pick-list pick-list-check" id="forwardList"></ul>
+          <p id="forwardErro" class="modal-error" style="display:none;"></p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-close>Cancelar</button>
+          <button type="button" class="btn btn-primary" id="forwardSend">Encaminhar</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="editOverlay">
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="editTitle">
+        <div class="modal-header">
+          <h2 id="editTitle">Editar mensagem</h2>
+          <button type="button" class="modal-close" data-close aria-label="Fechar">${iconSvg("x")}</button>
+        </div>
+        <div class="modal-body">
+          <textarea id="editInput" class="field-textarea" rows="4" maxlength="4000"></textarea>
+          <p class="modal-hint" id="editHint"></p>
+          <p id="editErro" class="modal-error" style="display:none;"></p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-close>Cancelar</button>
+          <button type="button" class="btn btn-primary" id="editSave">Salvar</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/js/conversas/main.js"></script>
   `;
   res.send(renderDashboardLayout({
     active: "conversas",
     title: "Conversas",
     content,
-    extraHead: `<link rel="stylesheet" href="/css/dashboard-conversas.css" />`,
+    extraHead: `<link rel="stylesheet" href="/css/dashboard-conversas.css" />
+  <script>window.CONVERSAS_BOOT = ${inlineJson(await conversationsBoot("Conversas"))};
+  window.ATENDIMENTO_COLUMNS = ${inlineJson(ATENDIMENTO_COLUMNS)};</script>`,
     bodyClass: "no-content-scroll",
     user: req.session.user,
   }));
@@ -257,10 +403,10 @@ export function contatosView(req, res) {
     <div class="dash-card dash-table-wrapper">
       <table class="dash-table">
         <thead>
-          <tr><th>Nome</th><th>Telefone</th><th>E-mail</th><th>Endereço</th><th>Nascimento</th><th>Atualizado em</th></tr>
+          <tr><th>Nome</th><th>Telefone</th><th>Etiquetas</th><th>E-mail</th><th>Endereço</th><th>Nascimento</th><th>Atualizado em</th></tr>
         </thead>
         <tbody id="contatosTbody">
-          <tr><td colspan="6" class="dash-empty">Carregando contatos...</td></tr>
+          <tr><td colspan="7" class="dash-empty">Carregando contatos...</td></tr>
         </tbody>
       </table>
     </div>
@@ -292,7 +438,7 @@ export function usuariosView(req, res) {
       <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="usuarioTitulo">
         <div class="modal-header">
           <h2 id="usuarioTitulo">Novo usuário</h2>
-          <button type="button" class="modal-close" data-close aria-label="Fechar">✕</button>
+          <button type="button" class="modal-close" data-close aria-label="Fechar">${iconSvg("x")}</button>
         </div>
         <form id="usuarioForm" autocomplete="off">
           <div class="modal-body">
@@ -328,7 +474,7 @@ export function usuariosView(req, res) {
       <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="senhaTitulo">
         <div class="modal-header">
           <h2 id="senhaTitulo">Redefinir senha</h2>
-          <button type="button" class="modal-close" data-close aria-label="Fechar">✕</button>
+          <button type="button" class="modal-close" data-close aria-label="Fechar">${iconSvg("x")}</button>
         </div>
         <form id="senhaForm" autocomplete="off">
           <div class="modal-body">

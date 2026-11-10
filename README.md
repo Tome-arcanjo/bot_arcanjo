@@ -98,8 +98,9 @@ bot_arcanjo/
 | `GET` | `/` | Redireciona para `/dashboard` |
 | `GET` | `/dashboard` | Redireciona para a aba padrão (`/dashboard/conversas`) |
 | `GET` | `/dashboard/configuracoes` | Personalidade do bot |
-| `GET` | `/dashboard/crm` | CRM (Kanban de casos, drag-and-drop) |
-| `GET` | `/dashboard/conversas` | Inbox de conversas por cliente |
+| `GET` | `/dashboard/atendimento` | Quadro de Atendimento (um card por cliente do WhatsApp, drag-and-drop) |
+| `GET` | `/dashboard/crm` | CRM (Kanban de casos, drag-and-drop) — só admin |
+| `GET` | `/dashboard/conversas` | Conversas estilo WhatsApp: abas Chats / Pendentes (fila) / Contatos (todos, A–Z), anexos, áudio, emojis, figurinhas, responder, reagir, encaminhar, editar/apagar, transferir, encerrar e etiquetas |
 | `GET` | `/dashboard/contatos` | Lista de clientes (captura automática via IA) |
 | `GET` | `/dashboard/canais` | Tabela de mensagens (antigo `/admin`) |
 | `GET` | `/dashboard/usuarios` | Gestão da equipe (somente admin) |
@@ -115,8 +116,8 @@ bot_arcanjo/
 | `/api/users` | Gestão de funcionários (somente admin) |
 | `/api/settings` | Personalidade do bot (salvar: somente admin) |
 | `/api/crm` | Casos do CRM: listar, mover, atribuir responsável, histórico e tempo real (`/api/crm/stream`) |
-| `/api/contatos` | Lista/busca de clientes |
-| `/api/conversas` | Sessões e mensagens; responder, assumir/devolver à IA, modelo de retomada, reenviar, presença e tempo real |
+| `/api/contatos` | Lista/busca de clientes; `PUT /api/contatos/:phone/tags` troca as etiquetas jurídicas |
+| `/api/conversas` | Sessões e mensagens; responder (citando), anexos, figurinhas, reagir, editar, apagar, encaminhar, assumir/devolver à IA, transferir, encerrar, modelo de retomada, reenviar, presença e tempo real |
 
 ---
 
@@ -151,6 +152,20 @@ bot_arcanjo/
 Adicionado por `migrations/2026-10-26_multiusuario.sql` (o mesmo bloco está no fim do `init.sql`). Tabelas novas: `users`, `web_sessions` e `case_events`. Colunas novas em `sessions` (pausa da IA e responsável), `messages` (papel `human`, autor e status de entrega) e `crm_cases` (responsável e última movimentação). Detalhes no `CLAUDE.md`.
 
 Para aplicar no Supabase, cole o arquivo no SQL Editor ou rode `npm run db:migrate`. O script é idempotente e não apaga dados. O rollback fica em `migrations/2026-10-26_multiusuario.rollback.sql` e **apaga** usuários e histórico.
+
+### Quadro de Atendimento e nome do WhatsApp
+
+Adicionado por `migrations/2026-11-04_quadro_atendimento.sql` (também no fim do `init.sql`). Colunas novas em `sessions`: `contact_name` (nome do perfil do WhatsApp) e `board_stage*` (coluna do cliente no quadro de Atendimento e quem o moveu). Idempotente, não apaga dados. Rollback em `migrations/2026-11-04_quadro_atendimento.rollback.sql` — rode-o **antes** do rollback do multiusuário.
+
+A foto de perfil não existe na API oficial (Cloud API) da Meta: o painel mostra as iniciais do nome com uma cor fixa por telefone.
+
+### Conversas estilo WhatsApp, fila e etiquetas
+
+Adicionado por `migrations/2026-11-10_conversas_whatsapp.sql` (também no fim do `init.sql`). Em `messages`: tipo e anexo (`message_type`, `media`), resposta citada, reações, encaminhada, editada e apagada. Em `sessions`: `queue_since` (fila de Pendentes). Em `clients`: `tags` (etiquetas jurídicas). Idempotente, não apaga dados. Rollback em `migrations/2026-11-10_conversas_whatsapp.rollback.sql` — rode-o **antes** dos rollbacks mais antigos.
+
+Os anexos ficam no disco do servidor, em `MEDIA_DIR` (padrão `data/media`, fora do git) — inclua essa pasta no backup da VPS. O banco guarda só a descrição.
+
+**Limites da API oficial (Cloud API)**: não existe editar nem apagar uma mensagem já entregue. No painel, "Editar" envia uma correção respondendo à original e "Apagar" esconde a mensagem só para a equipe (o cliente continua com ela). Reação é uma por lado (cliente e empresa).
 
 Para testar o SQL num Postgres local: `PG_TEST_URL=postgres://usuario@127.0.0.1:5432/banco npm test`. Os testes usam um schema temporário e o apagam no fim.
 
@@ -255,7 +270,9 @@ npm run db:migrate
 Faça nesta ordem. Até o número de produção da Meta existir, mantenha `WHATSAPP_SEND_ENABLED=false`: nada é enviado de verdade, e as mensagens aparecem no painel como "Não enviada".
 
 1. **Backup** do banco no Supabase (Database → Backups) antes de qualquer mudança.
-2. **SQL**: cole `migrations/2026-10-26_multiusuario.sql` no SQL Editor do Supabase (ou rode `npm run db:migrate`). O script é idempotente e não apaga nada. Confira se as tabelas `users`, `web_sessions` e `case_events` apareceram.
+2. **SQL**: cole, nesta ordem, `migrations/2026-10-26_multiusuario.sql`, `migrations/2026-11-04_quadro_atendimento.sql` e `migrations/2026-11-10_conversas_whatsapp.sql` no SQL Editor do Supabase (ou rode `npm run db:migrate`, que aplica o `init.sql` com todos). Os scripts são idempotentes e não apagam nada. Confira se as tabelas `users`, `web_sessions` e `case_events` e as colunas `sessions.board_stage`, `sessions.queue_since` e `clients.tags` apareceram.
+   - **ffmpeg** (`sudo apt install ffmpeg`): o Chrome grava áudio em WebM, que o WhatsApp não aceita; o servidor converte para OGG com o ffmpeg. Sem ele, só o áudio gravado no Chrome/Edge falha (com aviso claro).
+   - **Nginx**: `client_max_body_size 30m;` (seção Nginx abaixo), senão anexos acima de 1 MB dão erro 413.
 3. **`.env` na VPS** (veja o `.env.example`):
    - `SESSION_SECRET` (`openssl rand -hex 32`): obrigatório em produção;
    - `WHATSAPP_APP_SECRET`: sem ele o webhook recusa tudo;
@@ -269,7 +286,7 @@ Faça nesta ordem. Até o número de produção da Meta existir, mantenha `WHATS
    - Se aparecer `[Server] Requisição chegou como HTTP em produção`, ajuste o Nginx/Cloudflare (seção abaixo).
    - Quando o aviso sumir, troque para `COOKIE_SECURE=true`.
 8. **Conferência rápida**:
-   - duas pessoas abrem o CRM: o indicador "Ao vivo" fica verde, e um card movido por uma aparece na hora para a outra;
+   - duas pessoas abrem o Atendimento (e o admin, o CRM): o indicador "Ao vivo" fica verde, e um card movido por uma aparece na hora para a outra;
    - com `WHATSAPP_SIMULATE=true`, rode `node scripts/simular-mensagem.js 5511999999999 "Olá"` na VPS. A conversa aparece em Conversas, com a resposta da IA "Enviada (simulado)".
 9. **Rollback**: volte o código para a versão anterior (`git checkout <versão>`) e rode `pm2 restart bot-arcanjo`. As colunas novas não atrapalham a versão antiga. O SQL de rollback (`migrations/2026-10-26_multiusuario.rollback.sql`) só é necessário para limpar o banco, e ele **apaga** usuários e histórico.
 
@@ -308,6 +325,7 @@ location / {
     proxy_set_header Connection "";
     proxy_buffering off;          # SSE (tempo real do painel)
     proxy_read_timeout 1h;
+    client_max_body_size 30m;     # anexos das conversas (o padrão de 1 MB dá erro 413)
 }
 ```
 
@@ -351,6 +369,7 @@ location / {
 | `SESSION_SECRET` | ✅ em produção | — | Assina o cookie de login; o servidor não sobe em produção sem ele |
 | `COOKIE_SECURE` | ❌ | `auto` | `auto`, `true` ou `false` (ver seção Nginx) |
 | `TRUST_PROXY` | ❌ | `1` | Saltos de proxy confiáveis para `X-Forwarded-*` |
+| `MEDIA_DIR` | ❌ | `data/media` | Pasta dos anexos das conversas (relativa à pasta onde o app roda) |
 
 ---
 

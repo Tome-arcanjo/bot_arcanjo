@@ -58,23 +58,39 @@ function digits(phone) {
   return String(phone || "").replace(/\D/g, "");
 }
 
-async function postToGraph(to, body, label) {
+/**
+ * Confere as flags antes de falar com a Meta. Devolve null quando pode enviar
+ * de verdade; senão, o resultado a usar (simulado ou falha com o motivo).
+ */
+function sendGate(label, detail, simulated) {
+  if (!SEND_ENABLED) {
+    if (SIMULATE) {
+      console.log(`[WhatsApp][SIMULADO] ${label}: ${detail.slice(0, 200)}`);
+      return { ok: true, simulated: true, ...simulated };
+    }
+    console.warn(`[WhatsApp] Envio desligado (WHATSAPP_SEND_ENABLED=false) — ${label} não foi enviado.`);
+    return { ok: false, error: "Envio pelo WhatsApp desligado no servidor (WHATSAPP_SEND_ENABLED=false)." };
+  }
+  if (!WHATSAPP_TOKEN || !PHONE_NUMBER_ID) {
+    console.warn(`[WhatsApp] Tokens não configurados — ${label} não foi enviado.`);
+    return { ok: false, error: "WhatsApp não configurado no servidor (WHATSAPP_TOKEN / WHATSAPP_PHONE_NUMBER_ID)." };
+  }
+  return null;
+}
+
+// Ids de mensagens simuladas não existem na Meta: não servem de "context".
+const realWaId = (id) => (id && !String(id).startsWith("sim-") ? id : null);
+
+async function postToGraph(to, body, label, { replyTo } = {}) {
   const recipient = digits(to);
   if (!recipient) return { ok: false, error: "Conversa sem número de telefone." };
 
-  if (!SEND_ENABLED) {
-    if (SIMULATE) {
-      console.log(`[WhatsApp][SIMULADO] ${label} para ${recipient}: ${JSON.stringify(body).slice(0, 200)}`);
-      return { ok: true, simulated: true, waMessageId: `sim-${uuidv4()}` };
-    }
-    console.warn(`[WhatsApp] Envio desligado (WHATSAPP_SEND_ENABLED=false) — ${label} para ${recipient} não foi enviado.`);
-    return { ok: false, error: "Envio pelo WhatsApp desligado no servidor (WHATSAPP_SEND_ENABLED=false)." };
-  }
+  const context = realWaId(replyTo);
+  const payload = { messaging_product: "whatsapp", recipient_type: "individual", to: recipient, ...body };
+  if (context) payload.context = { message_id: context };
 
-  if (!WHATSAPP_TOKEN || !PHONE_NUMBER_ID) {
-    console.warn(`[WhatsApp] Tokens não configurados — ${label} para ${recipient} não foi enviado.`);
-    return { ok: false, error: "WhatsApp não configurado no servidor (WHATSAPP_TOKEN / WHATSAPP_PHONE_NUMBER_ID)." };
-  }
+  const gated = sendGate(`${label} para ${recipient}`, JSON.stringify(body), { waMessageId: `sim-${uuidv4()}` });
+  if (gated) return gated;
 
   try {
     const response = await fetch(`${GRAPH_BASE_URL}/messages`, {
@@ -83,7 +99,7 @@ async function postToGraph(to, body, label) {
         Authorization: `Bearer ${WHATSAPP_TOKEN}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ messaging_product: "whatsapp", recipient_type: "individual", to: recipient, ...body }),
+      body: JSON.stringify(payload),
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
@@ -104,8 +120,76 @@ async function postToGraph(to, body, label) {
  * @param {string} to - telefone com DDI (qualquer formatação; só os dígitos valem)
  * @param {string} text
  */
-export async function sendWhatsAppMessage(to, text) {
-  return postToGraph(to, { type: "text", text: { body: text } }, "mensagem");
+export async function sendWhatsAppMessage(to, text, { replyTo } = {}) {
+  return postToGraph(to, { type: "text", text: { body: text } }, "mensagem", { replyTo });
+}
+
+/**
+ * Envia um anexo já carregado na Meta (ver uploadWhatsAppMedia).
+ * @param {string} to
+ * @param {{ type: "image"|"audio"|"video"|"document"|"sticker", mediaId: string, caption?: string, filename?: string }} media
+ */
+export async function sendWhatsAppMedia(to, { type, mediaId, caption, filename }, { replyTo } = {}) {
+  const object = { id: mediaId };
+  // Áudio e figurinha não têm legenda; só documento tem nome de arquivo.
+  if (caption && (type === "image" || type === "video" || type === "document")) object.caption = caption;
+  if (filename && type === "document") object.filename = filename;
+  return postToGraph(to, { type, [type]: object }, type, { replyTo });
+}
+
+/** Reage (ou tira a reação, com emoji "") a uma mensagem da conversa. */
+export async function sendWhatsAppReaction(to, waMessageId, emoji) {
+  return postToGraph(to, { type: "reaction", reaction: { message_id: waMessageId, emoji: emoji || "" } }, "reação");
+}
+
+/**
+ * Carrega um arquivo na Meta para enviar depois por id (vale 30 dias).
+ * @returns {Promise<{ ok: boolean, mediaId?: string, error?: string, simulated?: boolean }>}
+ */
+export async function uploadWhatsAppMedia(buffer, mime, filename) {
+  const gated = sendGate("upload de anexo", `${filename} (${mime}, ${buffer.length} bytes)`, { mediaId: `sim-media-${uuidv4()}` });
+  if (gated) return gated;
+  try {
+    const form = new FormData();
+    form.append("messaging_product", "whatsapp");
+    form.append("type", mime);
+    form.append("file", new Blob([buffer], { type: mime }), filename);
+    const response = await fetch(`${GRAPH_BASE_URL}/media`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` },
+      body: form,
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.id) {
+      console.error(`[WhatsApp Error] upload de ${filename}: ${JSON.stringify(data.error || data)}`);
+      return { ok: false, error: describeMetaError(data.error) };
+    }
+    return { ok: true, mediaId: data.id };
+  } catch (error) {
+    console.error(`[WhatsApp Error] upload de ${filename}:`, error.message);
+    return { ok: false, error: "Falha de conexão com a API do WhatsApp ao enviar o anexo." };
+  }
+}
+
+/**
+ * Baixa um anexo recebido (value.messages[i].image.id etc). Só precisa do
+ * token — funciona mesmo com o envio desligado.
+ * @returns {Promise<{ ok: boolean, buffer?: Buffer, mime?: string, error?: string }>}
+ */
+export async function downloadWhatsAppMedia(mediaId) {
+  if (!WHATSAPP_TOKEN) return { ok: false, error: "Sem WHATSAPP_TOKEN para baixar o anexo." };
+  const auth = { Authorization: `Bearer ${WHATSAPP_TOKEN}` };
+  try {
+    const info = await fetch(`${GRAPH_URL}/${API_VERSION}/${mediaId}`, { headers: auth });
+    const meta = await info.json().catch(() => ({}));
+    if (!info.ok || !meta.url) return { ok: false, error: describeMetaError(meta.error) };
+    const file = await fetch(meta.url, { headers: auth });
+    if (!file.ok) return { ok: false, error: `A Meta não entregou o arquivo (HTTP ${file.status}).` };
+    return { ok: true, buffer: Buffer.from(await file.arrayBuffer()), mime: meta.mime_type || file.headers.get("content-type") };
+  } catch (error) {
+    console.error(`[WhatsApp Error] download do anexo ${mediaId}:`, error.message);
+    return { ok: false, error: "Falha de conexão ao baixar o anexo." };
+  }
 }
 
 /**

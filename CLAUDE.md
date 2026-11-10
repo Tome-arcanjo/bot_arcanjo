@@ -25,8 +25,11 @@ bot_arcanjo/
 │   │   ├── chatService.js         # Sessões, mensagens recebidas, geração da resposta da IA (toAiHistory)
 │   │   ├── whatsappService.js     # Cloud API: texto, modelo (template), flags de envio/simulação, erros da Meta
 │   │   ├── outboundService.js     # Caminho único de saída: grava, envia, status de entrega, janela de 24 h
-│   │   ├── handoverService.js     # Atendimento humano: assumir/devolver à IA, responder, presença
+│   │   ├── handoverService.js     # Atendimento humano: assumir/devolver/transferir/encerrar, responder (texto/anexo), presença
+│   │   ├── messageActionsService.js # Reagir, editar (correção), apagar (só painel), encaminhar, figurinhas
+│   │   ├── mediaService.js        # Anexos: tipos/limites da Meta, conversão de áudio (ffmpeg), disco (MEDIA_DIR)
 │   │   ├── clientsService.js      # CRUD da tabela de contatos (clients)
+│   │   ├── atendimentoService.js  # Quadro de Atendimento: mover cliente de coluna, nome do WhatsApp, reabrir finalizado
 │   │   ├── crmService.js          # Escritas em crm_cases: grava histórico + emite crmChanged (rotas, IA e ligações)
 │   │   ├── caseEventsService.js   # Histórico dos casos (case_events)
 │   │   ├── crmClassifierService.js # Classificação de casos + extração de contato via IA
@@ -41,13 +44,16 @@ bot_arcanjo/
 │   │   ├── db.js                  # Inicialização e singleton do cliente Supabase
 │   │   └── migrate.js             # npm run db:migrate (roda o init.sql via DATABASE_URL)
 │   ├── constants/
-│   │   └── crm.js                 # Colunas do Kanban (fonte única) e autores IA/Sistema
+│   │   ├── crm.js                 # Colunas do Kanban (fonte única) e autores IA/Sistema
+│   │   ├── atendimento.js         # Colunas do quadro de Atendimento (fonte única) + campos de etapa
+│   │   └── tags.js                # Etiquetas jurídicas dos clientes (fonte única)
 │   ├── utils/
 │   │   ├── events.js              # eventBus (EventEmitter global) que alimenta os SSE do painel
 │   │   ├── sse.js                 # openSseStream: heartbeat, X-Accel-Buffering, fecha no userRevoked
 │   │   └── loginLimiter.js        # Limite de tentativas de login por IP+usuário e por IP (em memória)
 │   ├── views/
-│   │   └── dashboardLayout.js     # Layout compartilhado do painel (sidebar, topbar, tema)
+│   │   ├── dashboardLayout.js     # Layout compartilhado do painel (sidebar, topbar, tema)
+│   │   └── icons.js               # Ícones de linha (fonte única: iconSvg no servidor, Dash.icon no navegador)
 │   ├── routes/
 │   │   ├── auth.js                # Rotas: /login, /logout
 │   │   ├── contatosRoutes.js      # Rotas: /api/contatos
@@ -59,6 +65,7 @@ bot_arcanjo/
 │   └── middleware/
 │       └── auth.js                # requireAuth (usuário em req.session.user) e requireAdmin
 ├── public/                        # Frontend estático (CSS/JS/imagens do painel)
+│   └── js/conversas/              # Tela de Conversas em módulos ES (store, list, thread, composer, drawer, main)
 ├── test/                          # npm test — node:test + Supabase falso (test/fakes) via loader (test/support)
 ├── data/                          # Dados locais (se houver)
 ├── logs/                          # Logs do PM2 (out.log, error.log)
@@ -101,6 +108,7 @@ bot_arcanjo/
 | `WHATSAPP_TEMPLATE_REENGAGE` / `WHATSAPP_TEMPLATE_LANG` | Modelo aprovado para retomar conversa fora da janela de 24 h | `retomada_atendimento` / `pt_BR` |
 | `CALL_ALERT_PHONES` | OPCIONAL: números (DDI, só dígitos, vírgula) que também recebem o aviso de "ligação atrasada" no WhatsApp. Vazio = só aviso no navegador | `5511999999999,5511888888888` |
 | `APP_TIMEZONE` | Fuso dos horários nas mensagens de ligação (padrão `America/Sao_Paulo`) | `America/Sao_Paulo` |
+| `MEDIA_DIR` | Pasta dos anexos das conversas (padrão `data/media`, relativo ao cwd; fora do git). Entra no backup da VPS | `data/media` |
 
 ---
 
@@ -114,8 +122,9 @@ bot_arcanjo/
 - `GET /` — Redireciona para `/dashboard`
 - `GET /dashboard` — Redireciona para a aba padrão (`/dashboard/conversas`)
 - `GET /dashboard/configuracoes` — Personalidade do bot
-- `GET /dashboard/crm` — CRM (Kanban de casos, com drag-and-drop)
-- `GET /dashboard/conversas` — Inbox de conversas por cliente
+- `GET /dashboard/atendimento` — Quadro de Atendimento (um card por cliente do WhatsApp, estilo Digisac)
+- `GET /dashboard/crm` — CRM (Kanban de casos, com drag-and-drop) — **só admin**
+- `GET /dashboard/conversas` — Conversas estilo WhatsApp (abas Chats / Pendentes / Contatos)
 - `GET /dashboard/contatos` — Lista de clientes (dados capturados automaticamente pela IA)
 - `GET /dashboard/canais` — Tabela de mensagens/canais (antigo `/admin`)
 - `GET /admin` — Mantido só como redirecionamento de compatibilidade para `/dashboard/canais`
@@ -124,7 +133,7 @@ bot_arcanjo/
 ### Login, usuários e papéis
 - Cada funcionário entra com **e-mail + senha** (tabela `users`, bcrypt). `ADMIN_USERNAME`/`ADMIN_PASSWORD_HASH` do `.env` são o **acesso de emergência**: um admin virtual (`id: null`, `emergency: true`, nome "Admin (emergência)"), que não depende da tabela `users`.
 - `req.session.user = { id, name, email, role }`. As sessões ficam em `web_sessions` (`sessionStore.js`) e sobrevivem a `pm2 restart`.
-- **Papéis**: `admin` gerencia usuários (`/api/users`), exclui casos (`DELETE /api/crm/cases/:id`) e edita a personalidade do bot (`POST /api/settings`, `/dashboard/configuracoes`). `atendente` faz todo o resto. Use `requireAdmin` (de `middleware/auth.js`) em toda rota nova que seja só de admin.
+- **Papéis**: `admin` gerencia usuários (`/api/users`), exclui casos (`DELETE /api/crm/cases/:id`), edita a personalidade do bot (`POST /api/settings`, `/dashboard/configuracoes`) e é o único que abre a tela do CRM de casos (`/dashboard/crm`; as APIs `/api/crm` continuam liberadas para todos). `atendente` trabalha no quadro de Atendimento e faz todo o resto. Use `requireAdmin` (de `middleware/auth.js`) em toda rota nova que seja só de admin.
 - **Derrubar acesso**: desativar, trocar o papel ou redefinir a senha apaga as sessões da pessoa (`sessionStore.destroyByUser`) e emite `userRevoked` no `eventBus`. **Todo SSE novo precisa escutar `userRevoked` e fechar a conexão do usuário.** Trocar a própria senha mantém só a sessão atual. Renomear atualiza as sessões abertas sem derrubar.
 - **Regras**: e-mail único (minúsculo); senha de 8 a 72 bytes; ninguém se rebaixa nem se desativa; sempre sobra um admin ativo; só se exclui definitivamente quem não tem histórico (senão, desativar).
 - Os sids encerrados ficam bloqueados por 30 min no store, para que uma requisição que estava em andamento (ex: SSE) não "ressuscite" a sessão ao terminar.
@@ -138,9 +147,28 @@ bot_arcanjo/
 - O card mostra o responsável (avatar; clique para atribuir/transferir) e "movido por X · há N min" (`status_changed_by_name`/`status_changed_at`). Clicar nesse texto abre o histórico.
 - Excluir caso: o botão só aparece para admin (e a rota exige `requireAdmin`).
 
+### Quadro de Atendimento e nome do WhatsApp
+- **Um card por conversa de WhatsApp** (`sessions` com `phone`), em colunas próprias (`src/constants/atendimento.js`: Aguardando atendimento → Em atendimento → Aguardando cliente → Finalizado), independentes do status jurídico do CRM. A etapa fica em `sessions.board_stage` (+ `board_stage_changed_by`/`_by_name`/`_at`).
+- `PATCH /api/conversas/:id/stage` `{ stage }` move o cliente (400 coluna inválida, 404 sem conversa). Toda mudança emite `sessionUpdated`, então quadro e Conversas se atualizam pelo SSE de `/api/conversas/stream` (evento `session`). O quadro usa `GET /api/conversas` (que traz `client_name` do cadastro como reserva).
+- **Nome do WhatsApp**: o webhook grava `contacts[].profile.name` em `sessions.contact_name` (`atendimentoService.syncIncomingContact`, que nunca bloqueia a mensagem). Quem escreve de novo depois de "Finalizado" volta para a primeira coluna (autor "Sistema").
+- **Foto de perfil**: a Cloud API não fornece. O painel usa `Dash.contactAvatarHtml(session)` (iniciais com cor fixa por telefone). Nome exibido: `Dash.contactName(s)` = `contact_name` → `client_name` → telefone (`Dash.formatPhone`).
+- O frontend (`dashboard-atendimento.js`) reaproveita o CSS do Kanban do CRM e o mesmo padrão: troca só o card afetado, fila durante o arrastar, realce + aviso para mudanças de outra pessoa, filtros "Todos / Meus atendimentos / Sem atendente" (pelo `handler_user_id`) no `localStorage` e busca por nome/telefone. Clicar no card abre `/dashboard/conversas?phone=`.
+- Migração: `migrations/2026-11-04_quadro_atendimento.sql` (também no fim do `init.sql`); rollback antes do rollback do multiusuário (FK para `users`).
+
+### Conversas estilo WhatsApp (`public/js/conversas/`, migração `2026-11-10_conversas_whatsapp.sql`)
+- **Abas**: Chats (`ai_paused`, alguém atende), Pendentes (IA respondendo e ninguém assumiu — a fila, por `sessions.queue_since`; padrão "maior espera" primeiro) e Contatos (todos os clientes — em atendimento, na fila ou encerrados —, de A a Z com separador por letra e a situação de cada um). `store.statusOf(s)` = atendimento | fila | encerrado. Ordenação por aba no `localStorage`; busca por nome/telefone/etiqueta; filtro por etiqueta.
+- **Fila (`queue_since`)**: entra quando o cliente escreve sem ninguém atendendo (`atendimentoService.syncIncomingContact`) e ao devolver à IA; sai ao assumir/transferir/encerrar.
+- **Transferir** (`POST /:id/transfer`) e **Encerrar** (`POST /:id/close`) ficam no `handoverService`. Assumir/transferir leva o card de "Aguardando atendimento"/"Finalizado" para "Em atendimento" (`stageFieldsOnHandle`). Encerrar = Finalizado + IA ativa + sem responsável; arrastar para Finalizado no quadro chama o mesmo `closeSession`. Online (para transferir) = tem SSE aberto (`utils/sse.isUserOnline`, também em `GET /api/crm/users`).
+- **Mensagens** (`messages`): `message_type` (text, image, audio, video, document, sticker, template, location, contacts, unsupported), `media` JSONB (`{ path, mime, name, size, sha256, caption, waId }`), `reply_to_id`, `reactions` (`[{ from: client|team, emoji, name, at }]`), `forwarded`, `edited_at`, `deleted_at`/`deleted_by_name`. Recebidas guardam `wa_message_id` (webhook repetido é ignorado; resposta citada e reação se ligam por ele).
+- **Anexos**: arquivo no disco (`mediaService`, `MEDIA_DIR`), servido só com login em `GET /api/conversas/media/:messageId` (HTML/SVG etc. só como download, com `CSP: sandbox`). Upload pelo painel: `POST /api/conversas/:id/media?mime=&name=&kind=&caption=&replyTo=` com o arquivo cru (`application/octet-stream`, até 25 MB). Envio para a Meta: upload em `/media` na primeira vez (`media.waId`) e depois mensagem do tipo certo — tudo dentro de `outboundService.transmit`, inclusive o reenvio. Áudio fora dos formatos aceitos (WebM do Chrome) é convertido para OGG com `ffmpeg`. Figurinha: WebP 512×512 (o painel converte no navegador).
+- **Limites da Cloud API**: não há editar nem apagar mensagem entregue. Editar = manda "*Correção:* …" citando a original (falhou = troca o texto); apagar = só no painel (autor ou admin, nunca mensagem do cliente). Reação: uma por lado, dentro da janela de 24 h.
+- **Etiquetas jurídicas**: `clients.tags` (ids de `src/constants/tags.js`), `PUT /api/contatos/:phone/tags`, evento `clientUpdated` (SSE `client`). Aparecem em Conversas, no quadro de Atendimento e em Contatos.
+- **Dados no HTML**: Conversas e Atendimento recebem a lista pronta em `window.CONVERSAS_BOOT` (`chatService.listConversations`), sem esperar a 1ª chamada; depois tudo vem pelo SSE.
+
 ### Layout e frontend compartilhado
 - `renderDashboardLayout({ ..., user: req.session.user })`: **toda view do painel deve passar `user`**. Ele mostra nome e papel no rodapé da sidebar (clicando abre o modal "Minha conta" para trocar a senha), esconde os itens `adminOnly` do menu ("Configurações" e "Usuários") de quem não é admin e mostra a faixa de aviso no acesso de emergência.
-- `window.Dash` (de `public/js/dashboard-common.js`, carregado no `<head>` antes dos scripts da página): `me` (usuário logado), `escapeHtml`, `initials`, `avatarHtml(user)`, `timeAgo(iso)` e `api(url, { method, body })`, que faz fetch JSON no padrão `{ success, error }`, lança `Error(error)` e manda para `/login` em caso de 401. Use isso em telas novas em vez de duplicar helpers.
+- `window.Dash` (de `public/js/dashboard-common.js`, carregado no `<head>` antes dos scripts da página): `me` (usuário logado), `escapeHtml`, `initials`, `avatarHtml(user)`, `contactAvatarHtml(session)`, `contactName(session)`, `formatPhone(phone)`, `tags` (catálogo), `tagById(id)`, `tagsHtml(ids, { max })`, `timeAgo(iso)` e `api(url, { method, body })`, que faz fetch JSON no padrão `{ success, error }` (Blob/FormData vão como estão), lança `Error(error)` e manda para `/login` em caso de 401. Use isso em telas novas em vez de duplicar helpers.
+- **Ícones**: só os de `src/views/icons.js` (traço fino, estilo Lucide, `currentColor`): `iconSvg(nome)` nas views e `Dash.icon(nome)` no navegador (o layout injeta os traços em `window.Dash.icons`). Não use emoji como ícone de interface (emoji é conteúdo: reações e o painel de emojis).
 - Classes compartilhadas em `brand.css`: `.modal-*` (antes ficavam só no CRM), `.avatar` (`.is-me` = anel dourado, `.avatar-empty` = sem responsável), `.btn-sm` e `.btn-danger`.
 - `requireAdmin` responde às telas com `forbiddenView` (403 dentro do layout) e às APIs com JSON 403.
 - `GET /dashboard/usuarios` (admin) — tela de Usuários (`dashboard-usuarios.js/.css`).
@@ -161,9 +189,12 @@ bot_arcanjo/
   - `DELETE /api/crm/cases/:id/call` — cancela a ligação e o bot avisa o cliente
 - `/api/contatos` — Lista/busca de clientes
 - `/api/conversas` — Sessões e mensagens (usado pela aba Conversas)
-  - `GET /api/conversas/stream` — SSE: mensagem nova (sem nome de evento), `status` (entrega), `session` (IA pausada/retomada, quem atende), `presence`
+  - `GET /api/conversas/stream` — SSE: mensagem nova (sem nome de evento), `status` (entrega), `update` (reação/edição/exclusão), `session` (IA pausada/retomada, quem atende, transferência, encerramento, coluna), `client` (etiquetas), `presence`
   - `GET /api/conversas/:id/state` — `{ session, window, viewers, sending: "on" | "simulated" | "off" }`
-  - `POST /api/conversas/:id/messages` `{ content, force? }` — funcionário responde (pausa a IA; 409 `HANDLED_BY_OTHER` / `WINDOW_CLOSED`)
+  - `POST /api/conversas/:id/messages` `{ content, replyTo?, force? }` — funcionário responde (pausa a IA; 409 `HANDLED_BY_OTHER` / `WINDOW_CLOSED`)
+  - `POST /api/conversas/:id/media?...` (arquivo cru) e `POST /api/conversas/:id/sticker` `{ messageId }` — anexo e figurinha já usada; `GET /api/conversas/stickers`, `GET /api/conversas/media/:messageId`
+  - `POST /api/conversas/:id/transfer` `{ userId, force? }`, `POST /api/conversas/:id/close` `{ force? }`
+  - `POST /api/conversas/messages/:messageId/react` `{ emoji }`, `PATCH /api/conversas/messages/:messageId` `{ content }` (editar), `DELETE` (apagar no painel), `POST .../forward` `{ sessionIds }`
   - `POST /api/conversas/:id/assume` `{ force? }`, `POST /api/conversas/:id/release` — assumir / devolver à IA
   - `POST /api/conversas/:id/template` — envia o modelo de retomada (fora das 24 h)
   - `POST /api/conversas/messages/:messageId/retry` — reenvia uma mensagem `failed`
@@ -199,7 +230,7 @@ Schema definido em `init.sql`. Duas tabelas principais:
 O admin agenda a ligação pelo card do caso no CRM (a IA nunca agenda). Colunas: `call_status` (`NULL` | `pendente` | `concluida` — etiquetas "Ligação Pendente" / "Ligação Concluída"), `call_scheduled_at`, `call_completed_at`, `call_reminders_sent`.
 
 - **Remarcar/cancelar**: o bot envia uma mensagem ao cliente pelo WhatsApp (via `outboundService`), registrada na conversa com o status da entrega, inclusive quando não pôde ser enviada.
-- **Atraso (aviso principal, no navegador)**: `public/js/dashboard-call-alerts.js` é carregado em todas as telas do painel (via `dashboardLayout.js`), consulta `/api/crm/calls/overdue` a cada 30 s e dispara notificação do sistema + som + faixa na tela quando a ligação passa do horário, repetindo a cada 30 min por 3 h (7 avisos). O último aviso dado fica no `localStorage`, então recarregar/navegar não repete. Para não virar spam (e não ser bloqueado por extensões como o Malwarebytes Browser Guard): várias ligações viram UMA notificação-resumo, com `tag` fixa (a nova substitui a anterior), sem `requireInteraction`, com 60 s de intervalo mínimo entre notificações, no máximo 3 faixas na tela e nunca duas consultas simultâneas. O admin precisa clicar em "🔔 Ativar alertas" uma vez para liberar as notificações, e alguma aba do painel precisa estar aberta. No CRM o card também fica vermelho ("atrasada") e há um banner no topo.
+- **Atraso (aviso principal, no navegador)**: `public/js/dashboard-call-alerts.js` é carregado em todas as telas do painel (via `dashboardLayout.js`), consulta `/api/crm/calls/overdue` a cada 30 s e dispara notificação do sistema + som + faixa na tela quando a ligação passa do horário, repetindo a cada 30 min por 3 h (7 avisos). O último aviso dado fica no `localStorage`, então recarregar/navegar não repete. Para não virar spam (e não ser bloqueado por extensões como o Malwarebytes Browser Guard): várias ligações viram UMA notificação-resumo, com `tag` fixa (a nova substitui a anterior), sem `requireInteraction`, com 60 s de intervalo mínimo entre notificações, no máximo 3 faixas na tela e nunca duas consultas simultâneas. O admin precisa clicar em "Ativar alertas" uma vez para liberar as notificações, e alguma aba do painel precisa estar aberta. No CRM o card também fica vermelho ("atrasada") e há um banner no topo.
 - **Atraso (opcional, WhatsApp)**: se `CALL_ALERT_PHONES` estiver preenchido, `callService.startCallReminderScheduler()` (boot, a cada 1 min) também manda o mesmo cronograma de avisos por WhatsApp. Concluir, cancelar ou remarcar encerra/zera os avisos.
 - Limitação da Meta: texto livre só é entregue a quem falou com o bot nas últimas 24 h; fora disso o envio falha (vale para o aviso ao cliente e para `CALL_ALERT_PHONES`; o painel avisa o admin quando o cliente não pôde ser notificado).
 - As colunas vêm de `init.sql` — rode `npm run db:migrate` (ou o SQL no Supabase) ao atualizar.
@@ -248,7 +279,7 @@ O painel (`/dashboard/*`) lê os mesmos dados (`sessions`, `messages`, `crm_case
 - **Assumir / Devolver** (`handoverService.js`): assumir pausa a IA e define `handler_user_id`. Responder pelo painel assume automaticamente. Se outra pessoa está atendendo, a API responde 409 `HANDLED_BY_OTHER` com `handler.name`, e o painel confirma antes de reenviar com `force: true`. Os eventos `ai_paused`/`ai_resumed` vão para `case_events` (com o `case_id` do caso do telefone, se houver) e para o SSE (`session`).
 - **Presença**: `POST /api/conversas/:id/presence` a cada 20 s (em memória, expira em 45 s) mostra "Fulana também está com esta conversa aberta".
 - **Histórico para a IA** (`chatService.toAiHistory`): `human` vira `assistant`, mensagens `failed` ficam de fora, turnos seguidos do mesmo papel são unidos e o histórico começa sempre pelo cliente.
-- Mídia não suportada (imagem, áudio etc.) fica registrada na conversa como `[O cliente enviou ...]` (sem classificar) e, com a IA ativa, o bot pede o conteúdo como texto.
+- Anexos do cliente (imagem, áudio, vídeo, documento, figurinha) são baixados da Meta (precisa de `WHATSAPP_TOKEN`) e guardados; o `content` fica `[O cliente enviou ...]: legenda` (sem classificar), que é o que a IA lê. Com a IA ativa, ela avisa que só lê texto (figurinha: a IA responde normal). Localização/contato continuam só registrados.
 - `?phone=` (link do CRM → Conversas) continua comparando só os dígitos.
 
 ---

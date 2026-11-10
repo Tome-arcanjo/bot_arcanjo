@@ -17,7 +17,7 @@
   }
 
   async function loadContatos(search) {
-    tbody.innerHTML = `<tr><td colspan="6" class="dash-empty">Carregando contatos...</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" class="dash-empty">Carregando contatos...</td></tr>`;
     try {
       const url = search ? `/api/contatos?search=${encodeURIComponent(search)}` : "/api/contatos";
       const res = await fetch(url);
@@ -25,13 +25,13 @@
       if (!json.success) throw new Error(json.error);
       renderTable(json.data || []);
     } catch (e) {
-      tbody.innerHTML = `<tr><td colspan="6" class="dash-empty">Erro ao carregar contatos.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="7" class="dash-empty">Erro ao carregar contatos.</td></tr>`;
     }
   }
 
   function renderTable(clients) {
     if (clients.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="6" class="dash-empty">Nenhum contato encontrado ainda. Os dados aparecem aqui conforme os clientes forem informando nome, e-mail, endereço ou data de nascimento pelo WhatsApp.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="7" class="dash-empty">Nenhum contato encontrado ainda. Os dados aparecem aqui conforme os clientes forem informando nome, e-mail, endereço ou data de nascimento pelo WhatsApp.</td></tr>`;
       return;
     }
 
@@ -39,6 +39,7 @@
       <tr>
         <td>${escapeHtml(c.name) || "—"}</td>
         <td>${escapeHtml(c.phone)}</td>
+        <td><div class="contatos-tags">${window.Dash.tagsHtml(c.tags) || "—"}</div></td>
         <td>${escapeHtml(c.email) || "—"}</td>
         <td>${escapeHtml(c.address) || "—"}</td>
         <td>${formatDate(c.birth_date)}</td>

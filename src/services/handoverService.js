@@ -4,6 +4,9 @@ import { getSessionById } from "./chatService.js";
 import { getCaseByPhone } from "./crmService.js";
 import { recordCaseEvent, actorOf } from "./caseEventsService.js";
 import { deliverMessage, getWindowState, sendReengageTemplate } from "./outboundService.js";
+import { getUserById } from "./usersService.js";
+import { FINISHED_STAGE, stageFields, stageFieldsOnHandle } from "../constants/atendimento.js";
+import { mediaLabel } from "./mediaService.js";
 
 /**
  * Atendimento humano nas conversas.
@@ -11,8 +14,11 @@ import { deliverMessage, getWindowState, sendReengageTemplate } from "./outbound
  * "Assumir" pausa a IA naquela conversa (sessions.ai_paused) e define quem
  * está atendendo (handler_user_id). Enquanto pausada, o webhook continua
  * salvando e classificando as mensagens do cliente, mas a IA não responde.
- * "Devolver à IA" desfaz. Enviar uma mensagem como humano assume a conversa
- * automaticamente.
+ * "Devolver à IA" desfaz e devolve o cliente à fila de "Atendimento pendente"
+ * (sessions.queue_since). Enviar uma mensagem como humano assume a conversa
+ * automaticamente. "Transferir" passa a conversa para outra pessoa e
+ * "Encerrar" finaliza o atendimento (coluna Finalizado do quadro; a IA volta
+ * a responder se o cliente escrever de novo).
  *
  * Para dois funcionários não responderem o mesmo cliente ao mesmo tempo:
  *  - responder/assumir uma conversa que outra pessoa está atendendo exige
@@ -87,7 +93,13 @@ export async function assumeSession(sessionId, user, { force = false } = {}) {
   const previous = session.ai_paused ? await userName(session.handler_user_id) : null;
   const updated = await updateSession(
     sessionId,
-    { ai_paused: true, ai_paused_at: new Date().toISOString(), handler_user_id: user?.id || null },
+    {
+      ai_paused: true,
+      ai_paused_at: new Date().toISOString(),
+      handler_user_id: user?.id || null,
+      queue_since: null,
+      ...stageFieldsOnHandle(session, user),
+    },
     user
   );
   await recordHandoverEvent(updated, user, "ai_paused", previous, user?.name || null);
@@ -101,20 +113,85 @@ export async function releaseSession(sessionId, user) {
   if (!session.ai_paused) return session;
 
   const previous = await userName(session.handler_user_id);
-  const updated = await updateSession(sessionId, { ai_paused: false, ai_paused_at: null, handler_user_id: null }, user);
+  const updated = await updateSession(
+    sessionId,
+    { ai_paused: false, ai_paused_at: null, handler_user_id: null, queue_since: new Date().toISOString() },
+    user
+  );
   await recordHandoverEvent(updated, user, "ai_resumed", previous, null);
   console.log(`[Atendimento] ${user?.name} devolveu a conversa ${session.phone || sessionId} à IA.`);
   return updated;
 }
 
+/** Transfere a conversa para outra pessoa da equipe (a IA fica pausada). */
+export async function transferSession(sessionId, toUserId, user, { force = false } = {}) {
+  const target = toUserId ? await getUserById(toUserId) : null;
+  if (!target || !target.active) throw new HandoverError("Escolha uma pessoa ativa da equipe.");
+  const session = await loadSession(sessionId);
+  await ensureNotHandledByOther(session, user, force);
+  if (session.ai_paused && session.handler_user_id === target.id) return session;
+
+  const previous = session.ai_paused ? await userName(session.handler_user_id) : null;
+  const updated = await updateSession(
+    sessionId,
+    {
+      ai_paused: true,
+      ai_paused_at: new Date().toISOString(),
+      handler_user_id: target.id,
+      queue_since: null,
+      ...stageFieldsOnHandle(session, user),
+    },
+    user
+  );
+  await recordHandoverEvent(updated, user, "ai_paused", previous, target.name);
+  console.log(`[Atendimento] ${user?.name} transferiu a conversa ${session.phone || sessionId} para ${target.name}.`);
+  return updated;
+}
+
 /**
- * Funcionário responde pelo painel. Pausa a IA automaticamente (assume).
- * Fora da janela de 24 h recusa com 409 WINDOW_CLOSED (o painel oferece o
- * modelo de retomada) em vez de gravar uma mensagem que a Meta vai recusar.
+ * Encerra o atendimento: coluna "Finalizado", sem responsável e fora da fila.
+ * Se o cliente escrever de novo, volta para a fila (atendimentoService).
  */
-export async function sendHumanMessage(sessionId, user, content, { force = false } = {}) {
+export async function closeSession(sessionId, user, { force = false } = {}) {
+  const session = await loadSession(sessionId);
+  await ensureNotHandledByOther(session, user, force);
+  if (session.board_stage === FINISHED_STAGE && !session.ai_paused && !session.queue_since) return session;
+
+  const previous = session.ai_paused ? await userName(session.handler_user_id) : null;
+  const updated = await updateSession(
+    sessionId,
+    { ai_paused: false, ai_paused_at: null, handler_user_id: null, queue_since: null, ...stageFields(FINISHED_STAGE, user) },
+    user
+  );
+  await recordHandoverEvent(updated, user, "ai_resumed", previous, "Atendimento encerrado");
+  console.log(`[Atendimento] ${user?.name} encerrou o atendimento de ${session.phone || sessionId}.`);
+  return updated;
+}
+
+async function loadReplyTarget(sessionId, replyToId) {
+  if (!replyToId) return null;
+  const { data } = await getDb().from("messages").select("id, session_id, deleted_at").eq("id", replyToId).maybeSingle();
+  if (!data || data.session_id !== sessionId || data.deleted_at) throw new HandoverError("A mensagem citada não existe mais nesta conversa.");
+  return data.id;
+}
+
+/**
+ * Funcionário responde pelo painel (texto ou anexo). Pausa a IA
+ * automaticamente (assume). Fora da janela de 24 h recusa com 409
+ * WINDOW_CLOSED (o painel oferece o modelo de retomada) em vez de gravar uma
+ * mensagem que a Meta vai recusar.
+ *
+ * @param {string} content - texto (para anexo, a legenda; pode ser vazio)
+ * @param {Object} [opts]
+ * @param {boolean} [opts.force] - responder mesmo com outra pessoa atendendo
+ * @param {string} [opts.replyToId] - mensagem citada (mesma conversa)
+ * @param {string} [opts.type] - tipo do anexo (mediaService.prepareUpload)
+ * @param {Object} [opts.media] - anexo já guardado (mediaService.saveMedia)
+ * @param {boolean} [opts.forwarded]
+ */
+export async function sendHumanMessage(sessionId, user, content, { force = false, replyToId = null, type = "text", media = null, forwarded = false } = {}) {
   const text = typeof content === "string" ? content.trim() : "";
-  if (!text) throw new HandoverError("Escreva a mensagem antes de enviar.");
+  if (!text && !media) throw new HandoverError("Escreva a mensagem antes de enviar.");
   if (text.length > MAX_MESSAGE_LENGTH) {
     throw new HandoverError(`Mensagem longa demais (máximo de ${MAX_MESSAGE_LENGTH} caracteres).`);
   }
@@ -132,10 +209,21 @@ export async function sendHumanMessage(sessionId, user, content, { force = false
     );
   }
 
+  const reply = await loadReplyTarget(sessionId, replyToId);
   if (!session.ai_paused || !sameUser(session.handler_user_id, user)) {
     session = await assumeSession(sessionId, user, { force: true });
   }
-  return deliverMessage({ session, content: text, role: "human", sender: user });
+  return deliverMessage({
+    session,
+    // Para a IA e as prévias, um anexo sem legenda vira "[Imagem]", "[Áudio]"...
+    content: text || `[${mediaLabel(type)}]`,
+    role: "human",
+    sender: user,
+    type: media ? type : "text",
+    media: media ? { ...media, caption: text || null } : null,
+    replyToId: reply,
+    forwarded,
+  });
 }
 
 /** Envia o modelo de retomada (vale fora da janela de 24 h). Também assume a conversa. */

@@ -193,21 +193,23 @@ test("scripts/simular-mensagem.js entrega uma mensagem assinada ao webhook", asy
   }
 });
 
-describe("3 quadros do Kanban no navegador ao mesmo tempo", { skip: noBrowser }, () => {
+// Os atendentes trabalham no quadro de Atendimento (o CRM de casos é do admin).
+describe("3 quadros de Atendimento no navegador ao mesmo tempo", { skip: noBrowser }, () => {
   let server;
   let browser;
   const pages = {};
   const t = (min) => new Date(Date.now() - min * 60000).toISOString();
+  const session = (id, phone, name, min) => ({ id, phone, contact_name: name, title: "WhatsApp", provider: "anthropic", board_stage: "Aguardando atendimento", ai_paused: false, updated_at: t(min), created_at: t(min) });
 
   before(async () => {
     server = await startServer({
       env: EMERGENCY_ENV,
       db: {
         users: teamRows(),
-        crm_cases: [
-          { id: "k1", phone: "5511920000001", client_name: "Cliente Um", status: "Novo caso", urgency_tag: "Alta", updated_at: t(1) },
-          { id: "k2", phone: "5511920000002", client_name: "Cliente Dois", status: "Novo caso", urgency_tag: "Normal", updated_at: t(2) },
-          { id: "k3", phone: "5511920000003", client_name: "Cliente Três", status: "Novo caso", urgency_tag: "Baixa", updated_at: t(3) },
+        sessions: [
+          session("k1", "5511920000001", "Cliente Um", 1),
+          session("k2", "5511920000002", "Cliente Dois", 2),
+          session("k3", "5511920000003", "Cliente Três", 3),
         ],
       },
     });
@@ -217,8 +219,8 @@ describe("3 quadros do Kanban no navegador ao mesmo tempo", { skip: noBrowser },
       await loginAs(client, TEAM[name]);
       const page = await browser.newPage(server.url);
       await page.login(client.jar.get("connect.sid"));
-      await page.goto("/dashboard/crm");
-      await page.waitFor(() => document.querySelectorAll(".crm-card").length === 3 && document.getElementById("crmLive").dataset.state === "on");
+      await page.goto("/dashboard/atendimento");
+      await page.waitFor(() => document.querySelectorAll(".at-card").length === 3 && document.getElementById("atLive").dataset.state === "on");
       pages[name] = page;
     }
   });
@@ -227,30 +229,30 @@ describe("3 quadros do Kanban no navegador ao mesmo tempo", { skip: noBrowser },
     await server?.stop();
   });
 
-  test("cada um arrasta um card diferente no mesmo instante e os três quadros convergem", async () => {
-    const drag = (page, id, status) =>
+  test("cada um arrasta um cliente diferente no mesmo instante e os três quadros convergem", async () => {
+    const drag = (page, id, stage) =>
       page.eval(`(() => {
-        const card = [...document.querySelectorAll(".crm-card")].find((c) => c.dataset.id === ${JSON.stringify(id)});
-        const col = [...document.querySelectorAll(".crm-column")].find((c) => c.dataset.status === ${JSON.stringify(status)});
+        const card = [...document.querySelectorAll(".at-card")].find((c) => c.dataset.id === ${JSON.stringify(id)});
+        const col = [...document.querySelectorAll(".crm-column")].find((c) => c.dataset.stage === ${JSON.stringify(stage)});
         const dt = new DataTransfer();
         card.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer: dt }));
         col.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer: dt }));
         col.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt }));
         card.dispatchEvent(new DragEvent("dragend", { bubbles: true, dataTransfer: dt }));
       })()`);
-    const target = { k1: "Em análise", k2: "Documentos pendentes", k3: "Processo iniciado" };
+    const target = { k1: "Em atendimento", k2: "Aguardando cliente", k3: "Finalizado" };
     await Promise.all([drag(pages.ana, "k1", target.k1), drag(pages.bia, "k2", target.k2), drag(pages.caio, "k3", target.k3)]);
 
     const expected = JSON.stringify(target);
     for (const page of Object.values(pages)) {
       await page.waitFor(`(() => {
         const pos = {};
-        document.querySelectorAll(".crm-card").forEach((c) => (pos[c.dataset.id] = c.closest(".crm-column").dataset.status));
+        document.querySelectorAll(".at-card").forEach((c) => (pos[c.dataset.id] = c.closest(".crm-column").dataset.stage));
         return JSON.stringify({ k1: pos.k1, k2: pos.k2, k3: pos.k3 }) === ${JSON.stringify(expected)};
       })()`);
     }
-    const db = server.readDb().crm_cases;
-    for (const [id, status] of Object.entries(target)) assert.equal(db.find((c) => c.id === id).status, status);
+    const db = server.readDb().sessions;
+    for (const [id, stage] of Object.entries(target)) assert.equal(db.find((s) => s.id === id).board_stage, stage);
 
     // cada um vê o aviso das mudanças dos outros dois (e não da própria)
     const toastsOf = (page) => page.waitFor(() => document.querySelectorAll(".crm-toast").length >= 2 && [...document.querySelectorAll(".crm-toast")].map((t) => t.textContent));

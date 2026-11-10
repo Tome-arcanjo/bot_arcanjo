@@ -487,6 +487,17 @@ body.no-content-scroll .dash-content {
   color: var(--text-muted);
 }
 
+/* Cliente do WhatsApp: iniciais com uma cor fixa por telefone (--avatar-hue,
+   ver contactAvatarHtml em dashboard-common.js). Tons escuros e dessaturados
+   para não competir com o dourado da marca. */
+.avatar-contact {
+  background: hsl(var(--avatar-hue, 210) 28% 22%);
+  border-color: hsl(var(--avatar-hue, 210) 30% 32%);
+  color: hsl(var(--avatar-hue, 210) 55% 82%);
+}
+
+.avatar-lg { width: 36px; height: 36px; font-size: 0.8rem; }
+
 /* ── Usuário logado (rodapé da sidebar) ── */
 .dash-user-chip {
   display: flex;
@@ -635,3 +646,16 @@ body.no-content-scroll .dash-content {
   .dash-topbar { padding: 0 16px; }
   .dash-emergency-banner { padding: 8px 16px; }
 }
+
+/* Etiquetas jurídicas do cliente (Dash.tagsHtml) */
+.tag-chip { white-space: nowrap; }
+.contatos-tags { display: flex; flex-wrap: wrap; gap: 3px; max-width: 260px; }
+
+/* Ícones de linha (src/views/icons.js / Dash.icon): seguem a cor e o tamanho do texto. */
+.icon { width: 1em; height: 1em; flex-shrink: 0; vertical-align: -0.14em; }
+/* Botões só de ícone (fechar, dispensar, excluir) */
+.modal-close, .call-toast-close { display: inline-flex; align-items: center; justify-content: center; }
+.modal-close .icon, .composer-x .icon { width: 16px; height: 16px; }
+.call-toast-close .icon, .crm-card-delete .icon { width: 14px; height: 14px; }
+.btn .icon { width: 15px; height: 15px; }
+.crm-call-alert .icon, .call-toast-title .icon { vertical-align: -0.18em; }
